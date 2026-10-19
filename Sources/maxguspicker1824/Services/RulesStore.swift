@@ -9,15 +9,27 @@ final class RulesStore: ObservableObject {
     }
 
     @Published var isPaused: Bool = false // Controlled from the Menu Bar
-    @Published var recentActivity: [String] = [] // Shown in Menu Bar
+    @Published var recentActivity: [ActivityRecord] = [] {
+        didSet { saveActivity() }
+    }
+
+    /// Used to open the Rule Builder Sheet pre-populated from a history item.
+    @Published var draftRuleFromHistory: RoutingRule? = nil
 
     private let userDefaults: UserDefaults
     private let storageKey: String
+    private let activityStorageKey: String
 
-    init(userDefaults: UserDefaults = .standard, storageKey: String = "SavedRoutingRules_v1") {
+    init(
+        userDefaults: UserDefaults = .standard,
+        storageKey: String = "SavedRoutingRules_v1",
+        activityStorageKey: String = "SavedRecentActivity_v1"
+    ) {
         self.userDefaults = userDefaults
         self.storageKey = storageKey
+        self.activityStorageKey = activityStorageKey
         loadRules()
+        loadActivity()
     }
 
     func findMatchingRule(for url: URL, sourceApp: SourceAppInfo? = nil) -> RoutingRule? {
@@ -90,25 +102,38 @@ final class RulesStore: ObservableObject {
         }
     }
 
-    func logActivity(url: URL, source: SourceAppInfo?, destination: String) {
-        let host = (url.scheme?.lowercased() == "mailto")
+    func logActivity(url: URL, source: SourceAppInfo?, target: AppTarget) {
+        let isMail = (url.scheme?.lowercased() == "mailto")
+        let hostOrRecipient = isMail
             ? (URLComponents(url: url, resolvingAgainstBaseURL: false)?.path ?? url.absoluteString)
             : (url.host ?? url.absoluteString)
-        let fromText = source.map { " (from \($0.name))" } ?? ""
-        let entry = "\(host)\(fromText) → \(destination)"
 
-        let update = {
-            self.recentActivity.insert(entry, at: 0)
-            if self.recentActivity.count > 5 {
-                self.recentActivity.removeLast()
-            }
-        }
+        let record = ActivityRecord(
+            timestamp: Date(),
+            urlString: url.absoluteString,
+            hostOrRecipient: hostOrRecipient,
+            routeType: isMail ? .mail : .web,
+            sourceApp: source,
+            targetAppBundleID: target.bundleID,
+            targetAppName: target.name,
+            targetProfile: target.profile
+        )
 
-        if Thread.isMainThread {
-            update()
-        } else {
-            DispatchQueue.main.async(execute: update)
+        // Avoid consecutive duplicate entries for the exact same host/app/source
+        self.recentActivity.removeAll {
+            $0.hostOrRecipient.caseInsensitiveCompare(record.hostOrRecipient) == .orderedSame &&
+            $0.targetAppBundleID == record.targetAppBundleID &&
+            $0.targetProfile == record.targetProfile &&
+            $0.sourceApp == record.sourceApp
         }
+        self.recentActivity.insert(record, at: 0)
+        if self.recentActivity.count > 20 {
+            self.recentActivity = Array(self.recentActivity.prefix(20))
+        }
+    }
+
+    func clearHistory() {
+        recentActivity.removeAll()
     }
 
     private func saveRules() {
@@ -123,5 +148,19 @@ final class RulesStore: ObservableObject {
             return
         }
         rules = decoded
+    }
+
+    private func saveActivity() {
+        if let encoded = try? JSONEncoder().encode(recentActivity) {
+            userDefaults.set(encoded, forKey: activityStorageKey)
+        }
+    }
+
+    private func loadActivity() {
+        guard let data = userDefaults.data(forKey: activityStorageKey),
+              let decoded = try? JSONDecoder().decode([ActivityRecord].self, from: data) else {
+            return
+        }
+        recentActivity = decoded
     }
 }

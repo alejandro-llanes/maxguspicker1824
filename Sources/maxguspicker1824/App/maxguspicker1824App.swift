@@ -36,17 +36,29 @@ struct MaxgusPicker1824App: App {
             }
             .keyboardShortcut(",", modifiers: .command)
 
-            // Recent Routed Links Submenu
+            // Recent Routed Links Submenu (allows creating rules directly from history)
             Menu {
                 if store.recentActivity.isEmpty {
                     Text("No links routed yet")
                 } else {
-                    ForEach(store.recentActivity, id: \.self) { item in
-                        Text(item)
+                    ForEach(store.recentActivity) { record in
+                        Menu(record.displaySummary) {
+                            Button {
+                                appDelegate.openRuleBuilderFromHistory(record)
+                            } label: {
+                                Label("Create Rule in Editor...", systemImage: "slider.horizontal.3")
+                            }
+
+                            Button {
+                                store.rules.append(record.toRoutingRule())
+                            } label: {
+                                Label("Quick-Save Rule (\(record.hostOrRecipient) → \(record.destinationDisplayTitle))", systemImage: "plus.circle")
+                            }
+                        }
                     }
                     Divider()
                     Button("Clear History") {
-                        store.recentActivity.removeAll()
+                        store.clearHistory()
                     }
                 }
             } label: {

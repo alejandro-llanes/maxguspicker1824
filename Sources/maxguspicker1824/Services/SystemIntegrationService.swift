@@ -2,6 +2,7 @@ import AppKit
 import ApplicationServices
 import Combine
 import Foundation
+import ServiceManagement
 import UniformTypeIdentifiers
 
 final class SystemIntegrationService: ObservableObject {
@@ -10,9 +11,15 @@ final class SystemIntegrationService: ObservableObject {
     @Published var isDefaultBrowser: Bool = false
     @Published var isDefaultMailClient: Bool = false
     @Published var hasAccessibilityPermission: Bool = false
+    @Published var isLaunchAtLoginEnabled: Bool = false
 
     private var timer: Timer?
     private let myBundleID = Bundle.main.bundleIdentifier ?? "com.maxguspicker1824.app"
+
+    private var launchAgentFileURL: URL {
+        FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/LaunchAgents/\(myBundleID).plist")
+    }
 
     private init() {
         refreshStatus()
@@ -43,6 +50,11 @@ final class SystemIntegrationService: ObservableObject {
 
         // 3. Check Accessibility Permission (for Safari Profiles)
         hasAccessibilityPermission = AXIsProcessTrusted()
+
+        // 4. Check Auto Start on Login (SMAppService or LaunchAgent plist)
+        let smEnabled = (SMAppService.mainApp.status == .enabled)
+        let plistExists = FileManager.default.fileExists(atPath: launchAgentFileURL.path)
+        isLaunchAtLoginEnabled = smEnabled || plistExists
     }
 
     func requestDefaultBrowser() {
@@ -69,5 +81,42 @@ final class SystemIntegrationService: ObservableObject {
         let options = [promptKey: true] as CFDictionary
         _ = AXIsProcessTrustedWithOptions(options)
         refreshStatus()
+    }
+
+    func toggleLaunchAtLogin() {
+        setLaunchAtLogin(!isLaunchAtLoginEnabled)
+    }
+
+    func setLaunchAtLogin(_ enabled: Bool) {
+        if enabled {
+            do {
+                try SMAppService.mainApp.register()
+            } catch {
+                // Fallback to user LaunchAgent plist when running with ad-hoc signature
+                installLaunchAgentPlist()
+            }
+            if SMAppService.mainApp.status != .enabled {
+                installLaunchAgentPlist()
+            }
+        } else {
+            try? SMAppService.mainApp.unregister()
+            try? FileManager.default.removeItem(at: launchAgentFileURL)
+        }
+        refreshStatus()
+    }
+
+    private func installLaunchAgentPlist() {
+        let execPath = Bundle.main.executableURL?.path ?? "/Applications/maxguspicker1824.app/Contents/MacOS/maxguspicker1824"
+        let plistDict: [String: Any] = [
+            "Label": myBundleID,
+            "ProgramArguments": [execPath],
+            "RunAtLoad": true,
+            "KeepAlive": false
+        ]
+        let launchAgentsDir = launchAgentFileURL.deletingLastPathComponent()
+        try? FileManager.default.createDirectory(at: launchAgentsDir, withIntermediateDirectories: true)
+        if let data = try? PropertyListSerialization.data(fromPropertyList: plistDict, format: .xml, options: 0) {
+            try? data.write(to: launchAgentFileURL, options: .atomic)
+        }
     }
 }

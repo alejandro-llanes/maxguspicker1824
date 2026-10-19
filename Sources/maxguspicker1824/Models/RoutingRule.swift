@@ -86,7 +86,7 @@ struct RoutingRule: Identifiable, Codable, Equatable {
         }
         let trimmedValue = value.trimmingCharacters(in: .whitespaces)
         if !trimmedValue.isEmpty {
-            if srcPrefixNeeded(parts: parts) {
+            if !parts.isEmpty {
                 parts.append("\(field.rawValue.lowercased()) \(matchOperator.rawValue) “\(trimmedValue)”")
             } else {
                 parts.append("When \(field.rawValue.lowercased()) \(matchOperator.rawValue) “\(trimmedValue)”")
@@ -96,8 +96,46 @@ struct RoutingRule: Identifiable, Codable, Equatable {
         }
         return parts.joined(separator: " • ")
     }
+}
 
-    private func srcPrefixNeeded(parts: [String]) -> Bool {
-        !parts.isEmpty
+/// Represents a previously opened URL/email and the target application used to open it.
+struct ActivityRecord: Identifiable, Codable, Equatable, Hashable {
+    var id: UUID = UUID()
+    var timestamp: Date = Date()
+    var urlString: String
+    var hostOrRecipient: String
+    var routeType: RouteType
+    var sourceApp: SourceAppInfo? = nil
+    var targetAppBundleID: String
+    var targetAppName: String
+    var targetProfile: BrowserProfile? = nil
+
+    var destinationDisplayTitle: String {
+        if let profile = targetProfile {
+            return "\(targetAppName) (\(profile.displayName))"
+        }
+        return targetAppName
+    }
+
+    var displaySummary: String {
+        let fromText = sourceApp.map { " (from \($0.name))" } ?? ""
+        return "\(hostOrRecipient)\(fromText) → \(destinationDisplayTitle)"
+    }
+
+    /// Converts this history record into a pre-configured `RoutingRule`.
+    func toRoutingRule() -> RoutingRule {
+        let matchField: MatchField = (routeType == .mail) ? .emailAddress : .domain
+        return RoutingRule(
+            name: "\(hostOrRecipient) → \(destinationDisplayTitle)",
+            type: routeType,
+            sourceApp: sourceApp,
+            field: matchField,
+            matchOperator: .equals,
+            value: hostOrRecipient,
+            targetAppBundleID: targetAppBundleID,
+            targetAppName: targetAppName,
+            targetProfile: targetProfile,
+            isEnabled: true
+        )
     }
 }

@@ -198,4 +198,36 @@ struct RulesStoreTests {
         #expect(reloadedStore.rules.count == 1)
         #expect(reloadedStore.rules.first == rule)
     }
+
+    @Test("Activity history logs opened apps and converts to RoutingRule")
+    func activityHistoryToRoutingRule() {
+        let suiteName = "maxguspicker1824Tests.History.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let store = RulesStore(
+            userDefaults: defaults,
+            storageKey: "TestRules",
+            activityStorageKey: "TestActivity"
+        )
+        let target = AppTarget(
+            bundleID: "com.brave.Browser",
+            name: "Brave Browser",
+            appURL: URL(fileURLWithPath: "/Applications/Brave Browser.app"),
+            icon: .init()
+        )
+        let source = SourceAppInfo(bundleID: "com.tinyspeck.slackmacgap", name: "Slack")
+        let url = URL(string: "https://github.com/alejandro-llanes")!
+
+        store.logActivity(url: url, source: source, target: target)
+        #expect(store.recentActivity.count == 1)
+
+        let record = store.recentActivity[0]
+        #expect(record.hostOrRecipient == "github.com")
+        #expect(record.targetAppBundleID == "com.brave.Browser")
+
+        let generatedRule = record.toRoutingRule()
+        store.rules = [generatedRule]
+        #expect(store.findMatchingRule(for: url, sourceApp: source)?.id == generatedRule.id)
+    }
 }

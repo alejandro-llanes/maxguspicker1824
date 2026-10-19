@@ -16,7 +16,7 @@ struct RulesManagerView: View {
     var body: some View {
         VStack(spacing: 0) {
             // MARK: - Top Header & Filter Bar
-            HStack(spacing: 16) {
+            HStack(spacing: 12) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Routing Rules")
                         .font(.title2.bold())
@@ -34,7 +34,33 @@ struct RulesManagerView: View {
                     }
                 }
                 .pickerStyle(.segmented)
-                .frame(width: 260)
+                .frame(width: 240)
+
+                // Create Rule from History Menu
+                Menu {
+                    if store.recentActivity.isEmpty {
+                        Text("No previously opened links yet")
+                    } else {
+                        Section("Select a previously opened link to create a rule:") {
+                            ForEach(store.recentActivity) { record in
+                                Button {
+                                    store.draftRuleFromHistory = record.toRoutingRule()
+                                } label: {
+                                    Text(record.displaySummary)
+                                }
+                            }
+                        }
+                        Divider()
+                        Button("Clear History", role: .destructive) {
+                            store.clearHistory()
+                        }
+                    }
+                } label: {
+                    Label("From History", systemImage: "clock.arrow.circlepath")
+                }
+                .menuStyle(.borderedButton)
+                .controlSize(.large)
+                .fixedSize()
 
                 Button {
                     isShowingNewRuleSheet = true
@@ -55,12 +81,30 @@ struct RulesManagerView: View {
                 ContentUnavailableView {
                     Label("No Routing Rules Yet", systemImage: "arrow.triangle.branch")
                 } description: {
-                    Text("Create a rule to automatically open work websites or specific emails in your preferred app and profile.")
+                    Text("Create a rule manually or from your history of previously opened links and applications.")
                 } actions: {
-                    Button("Create Your First Rule") {
-                        isShowingNewRuleSheet = true
+                    HStack(spacing: 12) {
+                        Button("Create Your First Rule") {
+                            isShowingNewRuleSheet = true
+                        }
+                        .buttonStyle(.borderedProminent)
+
+                        if !store.recentActivity.isEmpty {
+                            Menu {
+                                ForEach(store.recentActivity) { record in
+                                    Button {
+                                        store.draftRuleFromHistory = record.toRoutingRule()
+                                    } label: {
+                                        Text(record.displaySummary)
+                                    }
+                                }
+                            } label: {
+                                Label("Create Rule from History", systemImage: "clock.arrow.circlepath")
+                            }
+                            .menuStyle(.borderedButton)
+                            .fixedSize()
+                        }
                     }
-                    .buttonStyle(.borderedProminent)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
@@ -96,9 +140,14 @@ struct RulesManagerView: View {
             // MARK: - Bottom Live Rule Tester Bar
             LiveRuleTesterBar(testInput: $testInput, matchedRule: currentTestedRule)
         }
-        .frame(minWidth: 760, minHeight: 520)
+        .frame(minWidth: 820, minHeight: 540)
         .sheet(isPresented: $isShowingNewRuleSheet) {
             RuleBuilderSheet(existingRule: nil) { newRule in
+                store.rules.append(newRule)
+            }
+        }
+        .sheet(item: $store.draftRuleFromHistory) { templateRule in
+            RuleBuilderSheet(existingRule: nil, templateRule: templateRule) { newRule in
                 store.rules.append(newRule)
             }
         }

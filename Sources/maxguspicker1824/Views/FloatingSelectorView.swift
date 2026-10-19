@@ -1,16 +1,42 @@
 import AppKit
+import Combine
 import SwiftUI
 
 typealias ViewState<Value> = SwiftUI.State<Value>
 
+final class PickerSelectionModel: ObservableObject {
+    @Published var selectedIndex: Int = 0
+    let apps: [AppTarget]
+
+    init(apps: [AppTarget]) {
+        self.apps = apps
+        self.selectedIndex = 0
+    }
+
+    var selectedApp: AppTarget? {
+        guard !apps.isEmpty, apps.indices.contains(selectedIndex) else { return nil }
+        return apps[selectedIndex]
+    }
+
+    func moveLeft() {
+        guard !apps.isEmpty else { return }
+        selectedIndex = (selectedIndex - 1 + apps.count) % apps.count
+    }
+
+    func moveRight() {
+        guard !apps.isEmpty else { return }
+        selectedIndex = (selectedIndex + 1) % apps.count
+    }
+}
+
 struct FloatingSelectorView: View {
     let url: URL
     var sourceApp: SourceAppInfo? = nil
-    let apps: [AppTarget]
-    let onSelect: (AppTarget, Bool) -> Void
+    @ObservedObject var selectionModel: PickerSelectionModel
+    let iconSize: CGFloat
+    let tileWidth: CGFloat
+    let onSelect: (AppTarget) -> Void
     var onClose: (() -> Void)? = nil
-
-    @ViewState private var alwaysUseForHost = false
 
     private var displayHeader: String {
         if url.scheme?.lowercased() == "mailto" {
@@ -20,7 +46,7 @@ struct FloatingSelectorView: View {
     }
 
     var body: some View {
-        VStack(spacing: 10) {
+        VStack(spacing: 14) {
             // Top Drag Handle + Header Bar
             HStack(spacing: 8) {
                 // URL / Email Preview Pill
@@ -28,18 +54,18 @@ struct FloatingSelectorView: View {
                     Image(systemName: url.scheme?.lowercased() == "mailto" ? "envelope.fill" : "link")
                         .foregroundStyle(.secondary)
                     Text(displayHeader)
-                        .font(.caption.weight(.semibold))
+                        .font(.subheadline.weight(.semibold))
                         .lineLimit(1)
                         .truncationMode(.middle)
                     if let src = sourceApp {
                         Text("• \(src.name)")
-                            .font(.caption2)
+                            .font(.caption)
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
                     }
                 }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 4)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 5)
                 .background(.quaternary.opacity(0.5), in: Capsule())
 
                 Spacer(minLength: 4)
@@ -47,7 +73,7 @@ struct FloatingSelectorView: View {
                 // Subtle Drag Grip Indicator
                 Capsule()
                     .fill(.tertiary)
-                    .frame(width: 28, height: 4)
+                    .frame(width: 34, height: 4)
                     .help("Drag anywhere on the panel to move")
 
                 Spacer(minLength: 4)
@@ -57,7 +83,7 @@ struct FloatingSelectorView: View {
                         onClose()
                     } label: {
                         Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: 14))
+                            .font(.system(size: 16))
                             .foregroundStyle(.secondary)
                     }
                     .buttonStyle(.plain)
@@ -67,49 +93,67 @@ struct FloatingSelectorView: View {
             .contentShape(Rectangle())
             .background(WindowDragHandler())
 
-            // App Icons Row
-            if apps.isEmpty {
+            // App Icons Row with Keyboard Selection Highlight
+            if selectionModel.apps.isEmpty {
                 Text("No compatible applications found")
-                    .font(.caption)
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
-                    .padding(.vertical, 16)
+                    .padding(.vertical, 24)
             } else {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 16) {
-                        ForEach(apps) { app in
-                            AppSelectorTile(app: app) { targetWithOptionalProfile in
-                                onSelect(targetWithOptionalProfile, alwaysUseForHost)
+                ScrollViewReader { proxy in
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 14) {
+                            ForEach(Array(selectionModel.apps.enumerated()), id: \.element.id) { index, app in
+                                AppSelectorTile(
+                                    app: app,
+                                    isSelected: selectionModel.selectedIndex == index,
+                                    iconSize: iconSize,
+                                    tileWidth: tileWidth,
+                                    onHoverChange: { hovering in
+                                        if hovering {
+                                            selectionModel.selectedIndex = index
+                                        }
+                                    },
+                                    onPick: { targetWithOptionalProfile in
+                                        selectionModel.selectedIndex = index
+                                        onSelect(targetWithOptionalProfile)
+                                    }
+                                )
+                                .id(index)
                             }
                         }
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 4)
                     }
-                    .padding(.horizontal, 8)
+                    .onChange(of: selectionModel.selectedIndex) { _, newIndex in
+                        withAnimation(.easeInOut(duration: 0.15)) {
+                            proxy.scrollTo(newIndex, anchor: .center)
+                        }
+                    }
                 }
             }
 
-            Divider()
-
-            // One-Click Rule Creation Checkbox
-            HStack {
-                Toggle(isOn: $alwaysUseForHost) {
-                    Text("Always open **\(displayHeader)** with chosen app")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
-                .toggleStyle(.checkbox)
-                Spacer(minLength: 0)
+            // Subtle Keyboard Navigation Hint Bar
+            HStack(spacing: 16) {
+                Label("← → Select", systemImage: "arrow.left.arrow.right")
+                Label("⏎ Open", systemImage: "return")
+                Label("Esc Dismiss", systemImage: "escape")
             }
+            .font(.caption2)
+            .foregroundStyle(.secondary)
         }
-        .padding(14)
+        .padding(18)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(
             ZStack {
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
                     .fill(.ultraThinMaterial)
                 WindowDragHandler()
             }
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(.white.opacity(0.2), lineWidth: 1)
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .stroke(.white.opacity(0.22), lineWidth: 1)
         )
     }
 }
@@ -133,6 +177,10 @@ private struct WindowDragHandler: NSViewRepresentable {
 
 struct AppSelectorTile: View {
     let app: AppTarget
+    let isSelected: Bool
+    let iconSize: CGFloat
+    let tileWidth: CGFloat
+    let onHoverChange: (Bool) -> Void
     let onPick: (AppTarget) -> Void
 
     private var profiles: [BrowserProfile] {
@@ -143,13 +191,14 @@ struct AppSelectorTile: View {
     }
 
     var body: some View {
-        VStack(spacing: 5) {
+        VStack(spacing: 8) {
             Button {
                 onPick(app)
             } label: {
                 Image(nsImage: app.icon)
                     .resizable()
-                    .frame(width: 46, height: 46)
+                    .interpolation(.high)
+                    .frame(width: iconSize, height: iconSize)
             }
             .buttonStyle(.plain)
             .contextMenu {
@@ -168,7 +217,8 @@ struct AppSelectorTile: View {
 
             if profiles.isEmpty {
                 Text(app.name)
-                    .font(.caption2)
+                    .font(.caption.weight(isSelected ? .semibold : .regular))
+                    .foregroundStyle(isSelected ? .primary : .secondary)
                     .lineLimit(1)
             } else {
                 // Dropdown menu for profiles right under the browser icon
@@ -183,9 +233,10 @@ struct AppSelectorTile: View {
                         }
                     }
                 } label: {
-                    HStack(spacing: 2) {
+                    HStack(spacing: 3) {
                         Text(app.name)
-                            .font(.caption2)
+                            .font(.caption.weight(isSelected ? .semibold : .regular))
+                            .foregroundStyle(isSelected ? .primary : .secondary)
                             .lineLimit(1)
                         Image(systemName: "chevron.down")
                             .font(.system(size: 8, weight: .bold))
@@ -194,6 +245,25 @@ struct AppSelectorTile: View {
                 .menuStyle(.borderlessButton)
                 .fixedSize()
             }
+        }
+        .frame(width: tileWidth)
+        .padding(.vertical, 10)
+        .padding(.horizontal, 6)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(isSelected ? Color.accentColor.opacity(0.22) : Color.primary.opacity(0.03))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(
+                    isSelected ? Color.accentColor : Color.clear,
+                    lineWidth: isSelected ? 2.5 : 1
+                )
+        )
+        .scaleEffect(isSelected ? 1.03 : 1.0)
+        .animation(.easeOut(duration: 0.12), value: isSelected)
+        .onHover { hovering in
+            onHoverChange(hovering)
         }
     }
 }

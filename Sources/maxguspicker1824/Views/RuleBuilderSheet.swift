@@ -4,7 +4,10 @@ import UniformTypeIdentifiers
 
 struct RuleBuilderSheet: View {
     @Environment(\.dismiss) private var dismiss
+    @ObservedObject var store = RulesStore.shared
+
     let existingRule: RoutingRule?
+    var templateRule: RoutingRule? = nil
     let onSave: (RoutingRule) -> Void
 
     @ViewState private var name: String = ""
@@ -22,10 +25,30 @@ struct RuleBuilderSheet: View {
     var body: some View {
         VStack(spacing: 0) {
             // Header
-            HStack {
+            HStack(spacing: 12) {
                 Text(existingRule == nil ? "Create Routing Rule" : "Edit Routing Rule")
                     .font(.title3.bold())
+
                 Spacer()
+
+                // Quick Fill from History Menu
+                if !store.recentActivity.isEmpty {
+                    Menu {
+                        ForEach(store.recentActivity) { record in
+                            Button {
+                                applyRuleTemplate(record.toRoutingRule())
+                            } label: {
+                                Text(record.displaySummary)
+                            }
+                        }
+                    } label: {
+                        Label("Fill from History", systemImage: "clock.arrow.circlepath")
+                    }
+                    .menuStyle(.borderedButton)
+                    .controlSize(.regular)
+                    .fixedSize()
+                }
+
                 Button("Cancel") { dismiss() }
                     .keyboardShortcut(.cancelAction)
             }
@@ -183,7 +206,7 @@ struct RuleBuilderSheet: View {
             }
             .padding(20)
         }
-        .frame(width: 620, height: 580)
+        .frame(width: 640, height: 590)
         .onAppear {
             setupInitialState()
         }
@@ -200,19 +223,23 @@ struct RuleBuilderSheet: View {
     }
 
     private func setupInitialState() {
-        if let rule = existingRule {
-            name = rule.name
-            type = rule.type
-            selectedSourceApp = rule.sourceApp
-            field = rule.field
-            matchOperator = rule.matchOperator
-            value = rule.value
-            reloadInstalledApps(for: rule.type)
-            selectApp(rule.targetAppBundleID)
-            selectedProfile = rule.targetProfile
+        if let rule = existingRule ?? templateRule {
+            applyRuleTemplate(rule)
         } else {
             reloadInstalledApps(for: .web)
         }
+    }
+
+    private func applyRuleTemplate(_ rule: RoutingRule) {
+        name = rule.name
+        type = rule.type
+        selectedSourceApp = rule.sourceApp
+        field = rule.field
+        matchOperator = rule.matchOperator
+        value = rule.value
+        reloadInstalledApps(for: rule.type)
+        selectApp(rule.targetAppBundleID)
+        selectedProfile = rule.targetProfile
     }
 
     private func reloadInstalledApps(for routeType: RouteType) {
