@@ -10,17 +10,33 @@
 **maxguspicker1824** is a lightweight, menu-bar macOS utility inspired by Bumpr, Choosy, and Velja. When set as your default web browser and default email reader, it intercepts every `http`, `https`, and `mailto` link you click across macOS:
 
 - **Matches a Rule?** Automatically forwards the link to your configured browser (and specific browser profile/space) or mail client in the background.
-- **No Rule Match?** Spawns a sleek, cursor-positioned floating picker right under your mouse so you can pick the app or profile on the fly—or create a routing rule with a single click.
+- **No Rule Match?** Spawns a sleek, draggable, cursor-positioned floating picker right on your active Space (including Full Screen apps) so you can pick the app or profile on the fly—or create a routing rule with a single click.
+
+---
+
+## 📸 Screenshots
+
+| Floating App Selector | Menu Bar Control Center |
+| :---: | :---: |
+| <img src="docs/screenshots/floating-selector.png" alt="Floating App Selector" width="340" /> | <img src="docs/screenshots/menubar-menu.png" alt="Menu Bar Control Center" width="340" /> |
+| *Draggable cursor-positioned floating selector with one-click rule creation* | *Menu bar status icon with pause toggle, rule counter & recent activity* |
+
+### Visual 3-Step Rule Builder & Routing Rules Editor
+
+<p align="center">
+  <img src="docs/screenshots/rule-builder.png" alt="Visual 3-Step Rule Builder" width="760" />
+</p>
 
 ---
 
 ## ✨ Features
 
 ### 1. Cursor-Positioned Floating App & Profile Selector
-- **Appears Right at Your Cursor**: Spawns a borderless, non-activating `NSPanel` with `.ultraThinMaterial` blur centered at your mouse pointer (clamped to screen bounds).
+- **Appears Right at Your Cursor & Over Full-Screen Apps**: Spawns a borderless, non-activating `NSPanel` with `.ultraThinMaterial` blur centered at your mouse pointer on your active Space (including over full-screen applications).
+- **Freely Draggable**: Grab the top handle or anywhere on the panel background to reposition the floating selector on screen.
 - **Instant Profile Selection**: Left-click an app icon to open in its default window, or click the profile chevron (`▾`) / right-click the icon to pick a specific browser profile or workspace directly from the popup.
 - **One-Click Quick Rules**: Check **"Always open `<domain/recipient>` with chosen app"** before clicking an icon to save a permanent routing rule on the spot.
-- **Effortless Dismissal**: Click anywhere outside the popup or press `Esc` to dismiss.
+- **Effortless Dismissal**: Click the `×` button, click anywhere outside the popup, or press `Esc` to dismiss.
 - **Modifier Key Override (`Option ⌥`)**: Hold **Option (`⌥`)** while clicking any link to bypass all automatic routing rules and force the floating selector to appear.
 
 ### 2. Deep Browser Profile & Workspace Discovery
@@ -86,8 +102,13 @@ flowchart TD
 ```text
 maxguspicker1824/
 ├── Package.swift                                      # SwiftPM manifest (macOS 14+)
-├── Makefile                                           # Build, bundle, run, test, and clean targets
+├── Makefile                                           # Build, bundle, install, run, test, and clean targets
+├── LICENSE                                            # MIT License
 ├── TODO.md                                            # Phased implementation tracker
+├── docs/screenshots/                                  # Cropped UI screenshots for documentation
+│   ├── floating-selector.png
+│   ├── menubar-menu.png
+│   └── rule-builder.png
 ├── Resources/
 │   ├── Info.plist                                     # LSUIElement + http/https/mailto URL schemes
 │   └── maxguspicker1824.entitlements                  # Sandbox disabled + AppleEvents entitlement
@@ -95,8 +116,8 @@ maxguspicker1824/
 │   └── bundle_app.sh                                  # Compiles, assembles, signs & registers .app bundle
 ├── Sources/maxguspicker1824/
 │   ├── App/
-│   │   ├── maxguspicker1824App.swift                  # @main entry point, MenuBarExtra & Window scenes
-│   │   └── AppDelegate.swift                          # URL interception, FloatingPanel & quick rules
+│   │   ├── maxguspicker1824App.swift                  # @main entry point & MenuBarExtra scene
+│   │   └── AppDelegate.swift                          # URL interception, FloatingPanel & window management
 │   ├── Models/
 │   │   ├── AppTarget.swift                            # BrowserEngine, BrowserProfile, AppTarget, SourceAppInfo
 │   │   └── RoutingRule.swift                          # RouteType, MatchField, MatchOperator, RoutingRule
@@ -107,7 +128,7 @@ maxguspicker1824/
 │   │   ├── SourceAppDetector.swift                    # AppleEvent PID & frontmost app detection
 │   │   └── SystemIntegrationService.swift             # Default browser/mail & Accessibility status manager
 │   └── Views/
-│       ├── FloatingSelectorView.swift                 # Cursor-positioned floating picker UI
+│       ├── FloatingSelectorView.swift                 # Draggable cursor-positioned floating picker UI
 │       ├── OnboardingWizardView.swift                 # 3-step setup & permissions wizard
 │       ├── RuleBuilderSheet.swift                     # 3-step visual rule creation/editing sheet
 │       └── RulesManagerView.swift                     # Graphical rules list, cards & live rule tester bar
@@ -117,39 +138,37 @@ maxguspicker1824/
 
 ---
 
-## 🛠️ How to Build, Run, and Test
+## 🛠️ How to Build, Install, Run, and Test
 
 ### Prerequisites
 - **macOS 14.0 (Sonoma)** or later
 - **Apple Command Line Tools** or **Xcode** (`swift` 5.9+ / 6.x)
 
-### 1. Build & Package `maxguspicker1824.app`
-The project includes an automated packaging script that compiles the release binary via Swift Package Manager, assembles the `build/maxguspicker1824.app` bundle with `Info.plist`, signs it with `maxguspicker1824.entitlements`, and registers it with macOS LaunchServices:
+### 1. Build, Install to `/Applications`, and Launch
+To compile the release binary, package and sign `maxguspicker1824.app`, copy it into `/Applications`, register it with LaunchServices, and launch it in one step:
 
+```bash
+make install
+```
+
+### 2. Build Only (into `build/maxguspicker1824.app`)
 ```bash
 make app
 ```
 *(Or run `./scripts/bundle_app.sh release` directly.)*
 
-### 2. Launch the Application
-```bash
-make run
-```
-*(Or run `open build/maxguspicker1824.app`.)*
-
-When launched:
-1. Look for the branch icon (`arrow.triangle.branch`) in your **macOS Menu Bar**.
-2. On first launch, the **Welcome to maxguspicker1824** onboarding wizard will appear to help you set it as your default browser, default mail client, and grant optional Accessibility access.
-
 ### 3. Test Link & Mail Routing from the Terminal
-You can simulate clicking web links or `mailto:` links at any time using `open -a`:
+You can simulate clicking web links or `mailto:` links at any time using `open`:
 
 ```bash
 # Test a web link
-open -a build/maxguspicker1824.app "https://github.com/apple/swift"
+open "https://github.com/alejandro-llanes"
+
+# Or target the application explicitly
+open -a /Applications/maxguspicker1824.app "https://github.com/alejandro-llanes"
 
 # Test an email link with subject
-open -a build/maxguspicker1824.app "mailto:billing@acme.com?subject=Monthly%20Invoice"
+open -a /Applications/maxguspicker1824.app "mailto:billing@acme.com?subject=Monthly%20Invoice"
 ```
 
 ### 4. Run the Automated Unit Tests
@@ -169,7 +188,8 @@ make clean
 | Shortcut / Action | Behavior |
 | :--- | :--- |
 | **`Option (⌥)` + Click Link** | Bypass all routing rules and force the floating app selector at the cursor |
-| **`Esc` or Click Outside** | Dismiss the floating app selector without opening any application |
+| **Drag Panel Background / Top Bar** | Reposition the floating app selector anywhere on screen |
+| **`Esc`, `×`, or Click Outside** | Dismiss the floating app selector without opening any application |
 | **Click `▾` or Right-Click Icon** | Choose a specific browser Profile or Arc Space in the floating selector |
 | **`⌘ ,` (in Menu Bar)** | Open the **Routing Rules** graphical editor |
 | **`⌘ Q` (in Menu Bar)** | Quit **maxguspicker1824** |
