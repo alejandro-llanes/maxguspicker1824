@@ -21,12 +21,28 @@ struct MaxgusPicker1824App: App {
                 Divider()
             }
 
-            // Pause Toggle
+            // Pause & Smart Behavior Toggles
             Toggle(isOn: $store.isPaused) {
                 Label("Pause Rules (Always Show Picker)", systemImage: "pause.circle")
             }
 
+            Toggle(isOn: $store.sanitizeURLsEnabled) {
+                Label("Strip Tracking & Unwrap Redirects", systemImage: "sparkles")
+            }
+
+            Toggle(isOn: $store.prioritizeRunningBrowsers) {
+                Label("Prioritize Running Browsers", systemImage: "bolt.circle")
+            }
+
             Divider()
+
+            // Active Browser Tab Handoff
+            Button {
+                appDelegate.rerouteActiveBrowserTab()
+            } label: {
+                Label("Re-route Active Browser Tab...", systemImage: "arrow.up.right.square")
+            }
+            .keyboardShortcut("o", modifiers: [.command, .shift])
 
             // Quick Rules Summary & Editor Launch
             Button {
@@ -70,7 +86,7 @@ struct MaxgusPicker1824App: App {
             Button {
                 appDelegate.showOnboardingWindow()
             } label: {
-                Label("Setup & Permissions Wizard...", systemImage: "sparkles")
+                Label("Setup & Permissions Wizard...", systemImage: "gearshape.2")
             }
 
             Divider()

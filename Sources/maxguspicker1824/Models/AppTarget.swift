@@ -21,6 +21,9 @@ struct AppTarget: Identifiable, Hashable {
     let appURL: URL
     let icon: NSImage
     var profile: BrowserProfile? = nil
+    var isRunning: Bool = false
+    var isNativeAppHandoff: Bool = false
+    var openInPrivateMode: Bool = false
 
     var id: String {
         if let profile = profile {
@@ -30,19 +33,26 @@ struct AppTarget: Identifiable, Hashable {
     }
 
     var displayTitle: String {
+        var base = name
         if let profile = profile {
-            return "\(name) (\(profile.displayName))"
+            base += " (\(profile.displayName))"
         }
-        return name
+        if openInPrivateMode {
+            base += " [Private]"
+        }
+        return base
     }
 
     static func == (lhs: AppTarget, rhs: AppTarget) -> Bool {
-        lhs.id == rhs.id && lhs.appURL == rhs.appURL
+        lhs.id == rhs.id &&
+        lhs.appURL == rhs.appURL &&
+        lhs.openInPrivateMode == rhs.openInPrivateMode
     }
 
     func hash(into hasher: inout Hasher) {
         hasher.combine(id)
         hasher.combine(appURL)
+        hasher.combine(openInPrivateMode)
     }
 }
 

@@ -6,10 +6,14 @@ typealias ViewState<Value> = SwiftUI.State<Value>
 
 final class PickerSelectionModel: ObservableObject {
     @Published var selectedIndex: Int = 0
+    @Published var isURLPreviewExpanded: Bool = false
+    @Published var didCopyURL: Bool = false
     let apps: [AppTarget]
+    let url: URL
 
-    init(apps: [AppTarget]) {
+    init(apps: [AppTarget], url: URL) {
         self.apps = apps
+        self.url = url
         self.selectedIndex = 0
     }
 
@@ -26,6 +30,27 @@ final class PickerSelectionModel: ObservableObject {
     func moveRight() {
         guard !apps.isEmpty else { return }
         selectedIndex = (selectedIndex + 1) % apps.count
+    }
+
+    func toggleURLPreview() {
+        withAnimation(.easeInOut(duration: 0.15)) {
+            isURLPreviewExpanded.toggle()
+        }
+    }
+
+    func copyURLToPasteboard() {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        let stringToCopy: String
+        if url.scheme?.lowercased() == "mailto" {
+            stringToCopy = URLComponents(url: url, resolvingAgainstBaseURL: false)?.path ?? url.absoluteString
+        } else {
+            stringToCopy = url.absoluteString
+        }
+        pasteboard.setString(stringToCopy, forType: .string)
+        withAnimation(.easeInOut(duration: 0.15)) {
+            didCopyURL = true
+        }
     }
 }
 
@@ -46,27 +71,56 @@ struct FloatingSelectorView: View {
     }
 
     var body: some View {
-        VStack(spacing: 14) {
+        VStack(spacing: 12) {
             // Top Drag Handle + Header Bar
             HStack(spacing: 8) {
-                // URL / Email Preview Pill
-                HStack(spacing: 6) {
-                    Image(systemName: url.scheme?.lowercased() == "mailto" ? "envelope.fill" : "link")
-                        .foregroundStyle(.secondary)
-                    Text(displayHeader)
-                        .font(.subheadline.weight(.semibold))
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                    if let src = sourceApp {
-                        Text("• \(src.name)")
-                            .font(.caption)
+                // URL / Email Preview Pill (click or press Space to expand full URL)
+                Button {
+                    selectionModel.toggleURLPreview()
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: url.scheme?.lowercased() == "mailto" ? "envelope.fill" : "link")
                             .foregroundStyle(.secondary)
+                        Text(displayHeader)
+                            .font(.subheadline.weight(.semibold))
                             .lineLimit(1)
+                            .truncationMode(.middle)
+                        if let src = sourceApp {
+                            Text("• \(src.name)")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+                        Image(systemName: selectionModel.isURLPreviewExpanded ? "chevron.up" : "chevron.down")
+                            .font(.system(size: 8, weight: .bold))
+                            .foregroundStyle(.tertiary)
                     }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 5)
+                    .background(.quaternary.opacity(0.5), in: Capsule())
                 }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 5)
-                .background(.quaternary.opacity(0.5), in: Capsule())
+                .buttonStyle(.plain)
+                .help("\(url.absoluteString) (Click or press Space to toggle full URL)")
+
+                // Quick Copy URL Button (⌘C)
+                Button {
+                    selectionModel.copyURLToPasteboard()
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: selectionModel.didCopyURL ? "checkmark" : "doc.on.doc")
+                            .font(.system(size: 11, weight: .semibold))
+                        if selectionModel.didCopyURL {
+                            Text("Copied")
+                                .font(.caption2.weight(.semibold))
+                        }
+                    }
+                    .foregroundStyle(selectionModel.didCopyURL ? .green : .secondary)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 5)
+                    .background(.quaternary.opacity(0.4), in: Capsule())
+                }
+                .buttonStyle(.plain)
+                .help("Copy clean URL to clipboard (⌘C)")
 
                 Spacer(minLength: 4)
 
@@ -93,7 +147,23 @@ struct FloatingSelectorView: View {
             .contentShape(Rectangle())
             .background(WindowDragHandler())
 
-            // App Icons Row with Keyboard Selection Highlight
+            // Optional Expanded Full URL Preview Banner (toggled via Space or clicking domain pill)
+            if selectionModel.isURLPreviewExpanded {
+                HStack {
+                    Text(url.absoluteString)
+                        .font(.system(.caption2, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                        .truncationMode(.middle)
+                        .textSelection(.enabled)
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            }
+
+            // App Icons Row with Keyboard Selection Highlight & Number Badges
             if selectionModel.apps.isEmpty {
                 Text("No compatible applications found")
                     .font(.subheadline)
@@ -106,6 +176,7 @@ struct FloatingSelectorView: View {
                             ForEach(Array(selectionModel.apps.enumerated()), id: \.element.id) { index, app in
                                 AppSelectorTile(
                                     app: app,
+                                    shortcutNumber: index < 9 ? (index + 1) : nil,
                                     isSelected: selectionModel.selectedIndex == index,
                                     iconSize: iconSize,
                                     tileWidth: tileWidth,
@@ -116,7 +187,11 @@ struct FloatingSelectorView: View {
                                     },
                                     onPick: { targetWithOptionalProfile in
                                         selectionModel.selectedIndex = index
-                                        onSelect(targetWithOptionalProfile)
+                                        var chosen = targetWithOptionalProfile
+                                        if NSEvent.modifierFlags.contains(.shift) {
+                                            chosen.openInPrivateMode = true
+                                        }
+                                        onSelect(chosen)
                                     }
                                 )
                                 .id(index)
@@ -134,9 +209,11 @@ struct FloatingSelectorView: View {
             }
 
             // Subtle Keyboard Navigation Hint Bar
-            HStack(spacing: 16) {
-                Label("← → Select", systemImage: "arrow.left.arrow.right")
+            HStack(spacing: 14) {
+                Label("← → / 1–9 Select", systemImage: "keyboard")
                 Label("⏎ Open", systemImage: "return")
+                Label("⇧⏎ Private", systemImage: "eyeglasses")
+                Label("⌘C Copy", systemImage: "doc.on.doc")
                 Label("Esc Dismiss", systemImage: "escape")
             }
             .font(.caption2)
@@ -177,6 +254,7 @@ private struct WindowDragHandler: NSViewRepresentable {
 
 struct AppSelectorTile: View {
     let app: AppTarget
+    let shortcutNumber: Int?
     let isSelected: Bool
     let iconSize: CGFloat
     let tileWidth: CGFloat
@@ -192,30 +270,76 @@ struct AppSelectorTile: View {
 
     var body: some View {
         VStack(spacing: 8) {
-            Button {
-                onPick(app)
-            } label: {
-                Image(nsImage: app.icon)
-                    .resizable()
-                    .interpolation(.high)
-                    .frame(width: iconSize, height: iconSize)
-            }
-            .buttonStyle(.plain)
-            .contextMenu {
-                if !profiles.isEmpty {
-                    Button("Default Window") { onPick(app) }
-                    Divider()
-                    ForEach(profiles) { profile in
-                        Button(profile.displayName) {
-                            var modified = app
-                            modified.profile = profile
-                            onPick(modified)
+            ZStack(alignment: .topLeading) {
+                Button {
+                    onPick(app)
+                } label: {
+                    ZStack(alignment: .bottomTrailing) {
+                        Image(nsImage: app.icon)
+                            .resizable()
+                            .interpolation(.high)
+                            .frame(width: iconSize, height: iconSize)
+
+                        // Green dot indicator when the application is currently running
+                        if app.isRunning {
+                            Circle()
+                                .fill(Color.green)
+                                .frame(width: 10, height: 10)
+                                .overlay(
+                                    Circle()
+                                        .stroke(Color(nsColor: .windowBackgroundColor), lineWidth: 1.5)
+                                )
+                                .offset(x: 2, y: 2)
+                                .help("\(app.name) is currently running")
                         }
                     }
                 }
+                .buttonStyle(.plain)
+                .contextMenu {
+                    Button("Open in Default Window") { onPick(app) }
+                    Button("Open in Private / Incognito Window") {
+                        var privateTarget = app
+                        privateTarget.openInPrivateMode = true
+                        onPick(privateTarget)
+                    }
+                    if !profiles.isEmpty {
+                        Divider()
+                        ForEach(profiles) { profile in
+                            Button(profile.displayName) {
+                                var modified = app
+                                modified.profile = profile
+                                onPick(modified)
+                            }
+                        }
+                    }
+                }
+
+                // Number Shortcut Badge (1-9)
+                if let num = shortcutNumber {
+                    Text("\(num)")
+                        .font(.system(size: 10, weight: .bold, design: .rounded))
+                        .foregroundStyle(isSelected ? .white : .secondary)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 1.5)
+                        .background(
+                            Capsule()
+                                .fill(isSelected ? Color.accentColor : Color.secondary.opacity(0.22))
+                        )
+                        .offset(x: -8, y: -4)
+                }
             }
 
-            if profiles.isEmpty {
+            if app.isNativeAppHandoff {
+                HStack(spacing: 3) {
+                    Image(systemName: "arrow.up.forward.app.fill")
+                        .font(.system(size: 9))
+                        .foregroundStyle(.blue)
+                    Text(app.name)
+                        .font(.caption.weight(isSelected ? .semibold : .medium))
+                        .foregroundStyle(isSelected ? .primary : .secondary)
+                        .lineLimit(1)
+                }
+            } else if profiles.isEmpty {
                 Text(app.name)
                     .font(.caption.weight(isSelected ? .semibold : .regular))
                     .foregroundStyle(isSelected ? .primary : .secondary)
@@ -224,6 +348,11 @@ struct AppSelectorTile: View {
                 // Dropdown menu for profiles right under the browser icon
                 Menu {
                     Button("Default Window") { onPick(app) }
+                    Button("Private / Incognito Window") {
+                        var privateTarget = app
+                        privateTarget.openInPrivateMode = true
+                        onPick(privateTarget)
+                    }
                     Divider()
                     ForEach(profiles) { profile in
                         Button(profile.displayName) {

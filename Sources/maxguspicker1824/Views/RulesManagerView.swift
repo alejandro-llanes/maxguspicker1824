@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct RulesManagerView: View {
     @ObservedObject var store = RulesStore.shared
@@ -16,7 +17,7 @@ struct RulesManagerView: View {
     var body: some View {
         VStack(spacing: 0) {
             // MARK: - Top Header & Filter Bar
-            HStack(spacing: 12) {
+            HStack(spacing: 10) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Routing Rules")
                         .font(.title2.bold())
@@ -34,7 +35,26 @@ struct RulesManagerView: View {
                     }
                 }
                 .pickerStyle(.segmented)
-                .frame(width: 240)
+                .frame(width: 220)
+
+                // Templates Menu
+                Menu {
+                    Section("Starter Rule Templates:") {
+                        ForEach(RuleTemplatePreset.builtInPresets) { preset in
+                            Button {
+                                let defaultApp = AppDiscoveryService.shared.getAvailableHandlers(for: "https").first
+                                store.draftRuleFromHistory = preset.toRoutingRule(defaultApp: defaultApp)
+                            } label: {
+                                Label(preset.title, systemImage: preset.icon)
+                            }
+                        }
+                    }
+                } label: {
+                    Label("Templates", systemImage: "sparkles.rectangle.stack")
+                }
+                .menuStyle(.borderedButton)
+                .controlSize(.large)
+                .fixedSize()
 
                 // Create Rule from History Menu
                 Menu {
@@ -62,6 +82,28 @@ struct RulesManagerView: View {
                 .controlSize(.large)
                 .fixedSize()
 
+                // Export / Import Rules Menu
+                Menu {
+                    Button {
+                        exportRulesToFile()
+                    } label: {
+                        Label("Export Rules to JSON...", systemImage: "square.and.arrow.up")
+                    }
+                    .disabled(store.rules.isEmpty)
+
+                    Button {
+                        importRulesFromFile()
+                    } label: {
+                        Label("Import Rules from JSON...", systemImage: "square.and.arrow.down")
+                    }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                }
+                .menuStyle(.borderedButton)
+                .controlSize(.large)
+                .fixedSize()
+                .help("Export or Import Routing Rules (JSON)")
+
                 Button {
                     isShowingNewRuleSheet = true
                 } label: {
@@ -81,13 +123,28 @@ struct RulesManagerView: View {
                 ContentUnavailableView {
                     Label("No Routing Rules Yet", systemImage: "arrow.triangle.branch")
                 } description: {
-                    Text("Create a rule manually or from your history of previously opened links and applications.")
+                    Text("Create a rule manually, from a starter template, or from your history of previously opened links.")
                 } actions: {
                     HStack(spacing: 12) {
                         Button("Create Your First Rule") {
                             isShowingNewRuleSheet = true
                         }
                         .buttonStyle(.borderedProminent)
+
+                        Menu {
+                            ForEach(RuleTemplatePreset.builtInPresets) { preset in
+                                Button {
+                                    let defaultApp = AppDiscoveryService.shared.getAvailableHandlers(for: "https").first
+                                    store.draftRuleFromHistory = preset.toRoutingRule(defaultApp: defaultApp)
+                                } label: {
+                                    Label(preset.title, systemImage: preset.icon)
+                                }
+                            }
+                        } label: {
+                            Label("Use a Template", systemImage: "sparkles.rectangle.stack")
+                        }
+                        .menuStyle(.borderedButton)
+                        .fixedSize()
 
                         if !store.recentActivity.isEmpty {
                             Menu {
@@ -99,7 +156,7 @@ struct RulesManagerView: View {
                                     }
                                 }
                             } label: {
-                                Label("Create Rule from History", systemImage: "clock.arrow.circlepath")
+                                Label("From History", systemImage: "clock.arrow.circlepath")
                             }
                             .menuStyle(.borderedButton)
                             .fixedSize()
@@ -140,7 +197,7 @@ struct RulesManagerView: View {
             // MARK: - Bottom Live Rule Tester Bar
             LiveRuleTesterBar(testInput: $testInput, matchedRule: currentTestedRule)
         }
-        .frame(minWidth: 820, minHeight: 540)
+        .frame(minWidth: 880, minHeight: 560)
         .sheet(isPresented: $isShowingNewRuleSheet) {
             RuleBuilderSheet(existingRule: nil) { newRule in
                 store.rules.append(newRule)
@@ -160,10 +217,36 @@ struct RulesManagerView: View {
         }
     }
 
+    // MARK: - Export & Import Handlers
+
+    private func exportRulesToFile() {
+        guard let data = try? store.exportRulesData() else { return }
+        let savePanel = NSSavePanel()
+        savePanel.allowedContentTypes = [.json]
+        savePanel.nameFieldStringValue = "maxguspicker1824-rules.json"
+        savePanel.title = "Export Routing Rules"
+        if savePanel.runModal() == .OK, let url = savePanel.url {
+            try? data.write(to: url, options: .atomic)
+        }
+    }
+
+    private func importRulesFromFile() {
+        let openPanel = NSOpenPanel()
+        openPanel.allowedContentTypes = [.json]
+        openPanel.allowsMultipleSelection = false
+        openPanel.title = "Import Routing Rules"
+        if openPanel.runModal() == .OK,
+           let url = openPanel.url,
+           let data = try? Data(contentsOf: url) {
+            _ = try? store.importRules(from: data, merge: true)
+        }
+    }
+
     // MARK: - Live Tester Helpers
     private var currentTestedRule: RoutingRule? {
         guard let url = normalizedTestURL(from: testInput) else { return nil }
-        return store.findMatchingRule(for: url, sourceApp: nil)
+        let evaluatedURL = store.sanitizeURLsEnabled ? URLSanitizerService.shared.sanitize(url) : url
+        return store.findMatchingRule(for: evaluatedURL, sourceApp: nil)
     }
 
     private func isRuleMatchedByTester(_ rule: RoutingRule) -> Bool {
@@ -238,15 +321,23 @@ struct RuleRowCard: View {
                 .font(.subheadline.bold())
                 .foregroundStyle(.secondary)
 
-            // Right: Target Application & Profile Pill
+            // Right: Target Application, Profile & Private Pill
             HStack(spacing: 8) {
                 Image(nsImage: appIcon)
                     .resizable()
                     .frame(width: 28, height: 28)
 
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(rule.targetAppName)
-                        .font(.subheadline.weight(.medium))
+                    HStack(spacing: 4) {
+                        Text(rule.targetAppName)
+                            .font(.subheadline.weight(.medium))
+                        if rule.openInPrivateMode {
+                            Image(systemName: "eyeglasses")
+                                .font(.caption2)
+                                .foregroundStyle(.purple)
+                                .help("Opens in Private / Incognito Window")
+                        }
+                    }
                     if let profile = rule.targetProfile {
                         Text(profile.displayName)
                             .font(.caption2.weight(.semibold))

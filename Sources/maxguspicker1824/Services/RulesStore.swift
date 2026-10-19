@@ -9,11 +9,18 @@ final class RulesStore: ObservableObject {
     }
 
     @Published var isPaused: Bool = false // Controlled from the Menu Bar
+    @Published var sanitizeURLsEnabled: Bool = true {
+        didSet { userDefaults.set(sanitizeURLsEnabled, forKey: "SanitizeURLsEnabled_v1") }
+    }
+    @Published var prioritizeRunningBrowsers: Bool = true {
+        didSet { userDefaults.set(prioritizeRunningBrowsers, forKey: "PrioritizeRunningBrowsers_v1") }
+    }
+
     @Published var recentActivity: [ActivityRecord] = [] {
         didSet { saveActivity() }
     }
 
-    /// Used to open the Rule Builder Sheet pre-populated from a history item.
+    /// Used to open the Rule Builder Sheet pre-populated from a history item or template.
     @Published var draftRuleFromHistory: RoutingRule? = nil
 
     private let userDefaults: UserDefaults
@@ -28,27 +35,38 @@ final class RulesStore: ObservableObject {
         self.userDefaults = userDefaults
         self.storageKey = storageKey
         self.activityStorageKey = activityStorageKey
+        if userDefaults.object(forKey: "SanitizeURLsEnabled_v1") != nil {
+            self.sanitizeURLsEnabled = userDefaults.bool(forKey: "SanitizeURLsEnabled_v1")
+        }
+        if userDefaults.object(forKey: "PrioritizeRunningBrowsers_v1") != nil {
+            self.prioritizeRunningBrowsers = userDefaults.bool(forKey: "PrioritizeRunningBrowsers_v1")
+        }
         loadRules()
         loadActivity()
     }
 
-    func findMatchingRule(for url: URL, sourceApp: SourceAppInfo? = nil) -> RoutingRule? {
+    func findMatchingRule(for url: URL, sourceApp: SourceAppInfo? = nil, at date: Date = Date()) -> RoutingRule? {
         guard !isPaused, let scheme = url.scheme?.lowercased() else { return nil }
         let type: RouteType = (scheme == "mailto") ? .mail : .web
 
         for rule in rules where rule.isEnabled && rule.type == type {
-            // 1. If the rule specifies a Source App, it must match the sender
+            // 1. If the rule has an active schedule, verify day & time window
+            if let schedule = rule.schedule, schedule.isEnabled {
+                guard schedule.isActive(at: date) else { continue }
+            }
+
+            // 2. If the rule specifies a Source App, it must match the sender
             if let requiredSource = rule.sourceApp {
                 guard requiredSource.bundleID == sourceApp?.bundleID else { continue }
             }
 
-            // 2. If the rule has no URL/Email pattern (only Source App), it's an immediate match!
+            // 3. If the rule has no URL/Email pattern (only Source App), it's an immediate match!
             let cleanPattern = rule.value.trimmingCharacters(in: .whitespacesAndNewlines)
             if cleanPattern.isEmpty && rule.sourceApp != nil {
                 return rule
             }
 
-            // 3. Otherwise evaluate the URL/Email condition
+            // 4. Otherwise evaluate the URL/Email condition
             if evaluate(rule: rule, against: url) {
                 return rule
             }
@@ -116,7 +134,8 @@ final class RulesStore: ObservableObject {
             sourceApp: source,
             targetAppBundleID: target.bundleID,
             targetAppName: target.name,
-            targetProfile: target.profile
+            targetProfile: target.profile,
+            openedInPrivateMode: target.openInPrivateMode
         )
 
         // Avoid consecutive duplicate entries for the exact same host/app/source
@@ -124,7 +143,8 @@ final class RulesStore: ObservableObject {
             $0.hostOrRecipient.caseInsensitiveCompare(record.hostOrRecipient) == .orderedSame &&
             $0.targetAppBundleID == record.targetAppBundleID &&
             $0.targetProfile == record.targetProfile &&
-            $0.sourceApp == record.sourceApp
+            $0.sourceApp == record.sourceApp &&
+            $0.openedInPrivateMode == record.openedInPrivateMode
         }
         self.recentActivity.insert(record, at: 0)
         if self.recentActivity.count > 20 {
@@ -134,6 +154,37 @@ final class RulesStore: ObservableObject {
 
     func clearHistory() {
         recentActivity.removeAll()
+    }
+
+    // MARK: - Export & Import Rules (JSON)
+
+    func exportRulesData() throws -> Data {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        return try encoder.encode(rules)
+    }
+
+    @discardableResult
+    func importRules(from data: Data, merge: Bool = true) throws -> Int {
+        let decoded = try JSONDecoder().decode([RoutingRule].self, from: data)
+        if merge {
+            var existingIDs = Set(rules.map(\.id))
+            var addedCount = 0
+            for rule in decoded {
+                if !existingIDs.contains(rule.id) {
+                    rules.append(rule)
+                    existingIDs.insert(rule.id)
+                    addedCount += 1
+                } else if let idx = rules.firstIndex(where: { $0.id == rule.id }) {
+                    rules[idx] = rule
+                    addedCount += 1
+                }
+            }
+            return addedCount
+        } else {
+            rules = decoded
+            return decoded.count
+        }
     }
 
     private func saveRules() {

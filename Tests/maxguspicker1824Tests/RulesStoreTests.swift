@@ -2,12 +2,12 @@ import Foundation
 import Testing
 @testable import maxguspicker1824
 
-@Suite("RulesStore Routing Engine Tests")
+@Suite("RulesStore Routing Engine & Services Tests")
 struct RulesStoreTests {
     private func makeIsolatedStore() -> (RulesStore, UserDefaults, String) {
         let suiteName = "maxguspicker1824Tests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
-        let store = RulesStore(userDefaults: defaults, storageKey: "TestRules")
+        let store = RulesStore(userDefaults: defaults, storageKey: "TestRules", activityStorageKey: "TestActivity")
         return (store, defaults, suiteName)
     }
 
@@ -201,15 +201,9 @@ struct RulesStoreTests {
 
     @Test("Activity history logs opened apps and converts to RoutingRule")
     func activityHistoryToRoutingRule() {
-        let suiteName = "maxguspicker1824Tests.History.\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: suiteName)!
+        let (store, defaults, suiteName) = makeIsolatedStore()
         defer { defaults.removePersistentDomain(forName: suiteName) }
 
-        let store = RulesStore(
-            userDefaults: defaults,
-            storageKey: "TestRules",
-            activityStorageKey: "TestActivity"
-        )
         let target = AppTarget(
             bundleID: "com.brave.Browser",
             name: "Brave Browser",
@@ -229,5 +223,78 @@ struct RulesStoreTests {
         let generatedRule = record.toRoutingRule()
         store.rules = [generatedRule]
         #expect(store.findMatchingRule(for: url, sourceApp: source)?.id == generatedRule.id)
+    }
+
+    @Test("URLSanitizerService unwraps Google & SafeLinks redirects and strips utm/fbclid params")
+    func urlSanitizerUnwrapsAndStripsTracking() {
+        let dirtyGoogleRedirect = URL(string: "https://www.google.com/url?q=https%3A%2F%2Fgithub.com%2Fapple%2Fswift%3Futm_source%3Dnewsletter%26utm_medium%3Demail%26tab%3Dreadme%26fbclid%3DIwAR123&sa=D")!
+        let sanitized = URLSanitizerService.shared.sanitize(dirtyGoogleRedirect)
+        #expect(sanitized.absoluteString == "https://github.com/apple/swift?tab=readme")
+
+        let safeLink = URL(string: "https://nam01.safelinks.protection.outlook.com/?url=https%3A%2F%2Ffigma.com%2Ffile%2F123%3Fgclid%3Dabc&data=05")!
+        let unwrappedSafeLink = URLSanitizerService.shared.sanitize(safeLink)
+        #expect(unwrappedSafeLink.absoluteString == "https://figma.com/file/123")
+    }
+
+    @Test("NativeAppHandoffService converts Zoom, Figma, and Spotify URLs to native schemes")
+    func nativeAppDeepLinkConversion() {
+        let zoomURL = URL(string: "https://us02web.zoom.us/j/8912345678?pwd=secret")!
+        let zoomDeep = NativeAppHandoffService.shared.resolvedURL(for: zoomURL, targetBundleID: "us.zoom.xos")
+        #expect(zoomDeep.absoluteString == "zoommtg://zoom.us/join?confno=8912345678&pwd=secret")
+
+        let figmaURL = URL(string: "https://www.figma.com/design/abc123/Design-System")!
+        let figmaDeep = NativeAppHandoffService.shared.resolvedURL(for: figmaURL, targetBundleID: "com.figma.Desktop")
+        #expect(figmaDeep.absoluteString == "figma://www.figma.com/design/abc123/Design-System")
+
+        let spotifyURL = URL(string: "https://open.spotify.com/track/4cOdK2wGLETKBW3PvgPWqT")!
+        let spotifyDeep = NativeAppHandoffService.shared.resolvedURL(for: spotifyURL, targetBundleID: "com.spotify.client")
+        #expect(spotifyDeep.absoluteString == "spotify://track/4cOdK2wGLETKBW3PvgPWqT")
+    }
+
+    @Test("RuleSchedule evaluates work hours and JSON export/import round-trips")
+    func scheduleAndExportImportRoundTrip() throws {
+        let (store, defaults, suiteName) = makeIsolatedStore()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let workSchedule = RuleSchedule(
+            isEnabled: true,
+            daysOfWeek: [2, 3, 4, 5, 6], // Mon-Fri
+            startHour: 9,
+            startMinute: 0,
+            endHour: 18,
+            endMinute: 0
+        )
+        let scheduledRule = RoutingRule(
+            name: "Work Hours GitHub",
+            type: .web,
+            field: .domain,
+            matchOperator: .equals,
+            value: "github.com",
+            targetAppBundleID: "com.google.Chrome",
+            targetAppName: "Google Chrome",
+            openInPrivateMode: true,
+            schedule: workSchedule
+        )
+        store.rules = [scheduledRule]
+
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone.current
+
+        // Monday at 10:30 AM (weekday = 2) -> matches
+        let mondayMorning = calendar.date(from: DateComponents(year: 2026, month: 10, day: 19, hour: 10, minute: 30))!
+        #expect(store.findMatchingRule(for: URL(string: "https://github.com")!, at: mondayMorning)?.id == scheduledRule.id)
+
+        // Monday at 8:30 PM (20:30) -> outside schedule -> nil
+        let mondayNight = calendar.date(from: DateComponents(year: 2026, month: 10, day: 19, hour: 20, minute: 30))!
+        #expect(store.findMatchingRule(for: URL(string: "https://github.com")!, at: mondayNight) == nil)
+
+        // Export and Import JSON
+        let exportedData = try store.exportRulesData()
+        store.rules.removeAll()
+        #expect(store.rules.isEmpty)
+
+        let importedCount = try store.importRules(from: exportedData, merge: true)
+        #expect(importedCount == 1)
+        #expect(store.rules.first == scheduledRule)
     }
 }

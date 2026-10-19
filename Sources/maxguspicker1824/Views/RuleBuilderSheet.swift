@@ -17,10 +17,22 @@ struct RuleBuilderSheet: View {
     @ViewState private var matchOperator: MatchOperator = .contains
     @ViewState private var value: String = ""
 
+    // Schedule state
+    @ViewState private var scheduleEnabled: Bool = false
+    @ViewState private var scheduleDays: Set<Int> = [2, 3, 4, 5, 6]
+    @ViewState private var scheduleStartHour: Int = 9
+    @ViewState private var scheduleEndHour: Int = 18
+
+    // Destination state
     @ViewState private var availableApps: [AppTarget] = []
     @ViewState private var selectedAppBundleID: String = ""
     @ViewState private var availableProfiles: [BrowserProfile] = []
     @ViewState private var selectedProfile: BrowserProfile? = nil
+    @ViewState private var openInPrivateMode: Bool = false
+
+    private let orderedWeekdays: [(id: Int, label: String)] = [
+        (2, "Mon"), (3, "Tue"), (4, "Wed"), (5, "Thu"), (6, "Fri"), (7, "Sat"), (1, "Sun")
+    ]
 
     var body: some View {
         VStack(spacing: 0) {
@@ -30,6 +42,22 @@ struct RuleBuilderSheet: View {
                     .font(.title3.bold())
 
                 Spacer()
+
+                // Quick Fill from Presets
+                Menu {
+                    ForEach(RuleTemplatePreset.builtInPresets) { preset in
+                        Button {
+                            applyRuleTemplate(preset.toRoutingRule(defaultApp: availableApps.first))
+                        } label: {
+                            Label(preset.title, systemImage: preset.icon)
+                        }
+                    }
+                } label: {
+                    Label("Templates", systemImage: "sparkles.rectangle.stack")
+                }
+                .menuStyle(.borderedButton)
+                .controlSize(.regular)
+                .fixedSize()
 
                 // Quick Fill from History Menu
                 if !store.recentActivity.isEmpty {
@@ -83,7 +111,7 @@ struct RuleBuilderSheet: View {
                         .padding(8)
                     }
 
-                    // STEP 2: Condition Builder
+                    // STEP 2: Condition Builder + Schedule
                     GroupBox {
                         VStack(alignment: .leading, spacing: 12) {
                             Label("2. When a link matches this condition", systemImage: "2.circle.fill")
@@ -114,6 +142,59 @@ struct RuleBuilderSheet: View {
                                     .textFieldStyle(.roundedBorder)
                             }
 
+                            Divider()
+
+                            // Optional Work Hours / Schedule Filter
+                            VStack(alignment: .leading, spacing: 10) {
+                                Toggle(isOn: $scheduleEnabled) {
+                                    Label("Only active during specific days & hours (Work Hours / Schedule)", systemImage: "clock.badge.checkmark")
+                                        .font(.subheadline.weight(.medium))
+                                }
+                                .toggleStyle(.checkbox)
+
+                                if scheduleEnabled {
+                                    HStack(spacing: 6) {
+                                        ForEach(orderedWeekdays, id: \.id) { day in
+                                            let isSelected = scheduleDays.contains(day.id)
+                                            Button {
+                                                if isSelected && scheduleDays.count > 1 {
+                                                    scheduleDays.remove(day.id)
+                                                } else {
+                                                    scheduleDays.insert(day.id)
+                                                }
+                                            } label: {
+                                                Text(day.label)
+                                                    .font(.caption.weight(.semibold))
+                                                    .padding(.horizontal, 8)
+                                                    .padding(.vertical, 4)
+                                                    .background(
+                                                        Capsule()
+                                                            .fill(isSelected ? Color.accentColor : Color.secondary.opacity(0.15))
+                                                    )
+                                                    .foregroundStyle(isSelected ? .white : .primary)
+                                            }
+                                            .buttonStyle(.plain)
+                                        }
+
+                                        Spacer()
+
+                                        Picker("From", selection: $scheduleStartHour) {
+                                            ForEach(0..<24, id: \.self) { hour in
+                                                Text(String(format: "%02d:00", hour)).tag(hour)
+                                            }
+                                        }
+                                        .frame(width: 110)
+
+                                        Picker("To", selection: $scheduleEndHour) {
+                                            ForEach(0..<24, id: \.self) { hour in
+                                                Text(String(format: "%02d:00", hour)).tag(hour)
+                                            }
+                                        }
+                                        .frame(width: 100)
+                                    }
+                                }
+                            }
+
                             // Plain-English preview
                             let cleanVal = value.trimmingCharacters(in: .whitespaces)
                             if !cleanVal.isEmpty || selectedSourceApp != nil {
@@ -130,7 +211,7 @@ struct RuleBuilderSheet: View {
                         .padding(8)
                     }
 
-                    // STEP 3: Target App & Profile
+                    // STEP 3: Target App, Profile & Private Mode
                     GroupBox {
                         VStack(alignment: .leading, spacing: 12) {
                             Label("3. Open automatically in", systemImage: "3.circle.fill")
@@ -168,20 +249,33 @@ struct RuleBuilderSheet: View {
                                 }
                             }
 
-                            // Profile / Space Picker (if the selected browser has profiles)
-                            if !availableProfiles.isEmpty {
+                            // Profile / Space Picker & Private / Incognito Mode
+                            if !availableProfiles.isEmpty || type == .web {
                                 Divider().padding(.vertical, 4)
-                                HStack {
-                                    Label("Browser Profile / Space:", systemImage: "person.crop.circle.badge.checkmark")
-                                        .font(.subheadline.weight(.medium))
+                                HStack(spacing: 16) {
+                                    if !availableProfiles.isEmpty {
+                                        Label("Profile / Space:", systemImage: "person.crop.circle.badge.checkmark")
+                                            .font(.subheadline.weight(.medium))
 
-                                    Picker("", selection: $selectedProfile) {
-                                        Text("Default / Last Active Window").tag(BrowserProfile?.none)
-                                        ForEach(availableProfiles) { profile in
-                                            Text(profile.displayName).tag(BrowserProfile?.some(profile))
+                                        Picker("", selection: $selectedProfile) {
+                                            Text("Default / Last Active Window").tag(BrowserProfile?.none)
+                                            ForEach(availableProfiles) { profile in
+                                                Text(profile.displayName).tag(BrowserProfile?.some(profile))
+                                            }
                                         }
+                                        .labelsHidden()
+                                        .frame(maxWidth: 220)
                                     }
-                                    .frame(maxWidth: 260)
+
+                                    if type == .web {
+                                        Toggle(isOn: $openInPrivateMode) {
+                                            Label("Open in Private / Incognito Window", systemImage: "eyeglasses")
+                                                .font(.subheadline)
+                                        }
+                                        .toggleStyle(.checkbox)
+                                    }
+
+                                    Spacer()
                                 }
                             }
                         }
@@ -206,7 +300,7 @@ struct RuleBuilderSheet: View {
             }
             .padding(20)
         }
-        .frame(width: 640, height: 590)
+        .frame(width: 660, height: 640)
         .onAppear {
             setupInitialState()
         }
@@ -237,6 +331,15 @@ struct RuleBuilderSheet: View {
         field = rule.field
         matchOperator = rule.matchOperator
         value = rule.value
+        openInPrivateMode = rule.openInPrivateMode
+        if let sched = rule.schedule {
+            scheduleEnabled = sched.isEnabled
+            scheduleDays = sched.daysOfWeek
+            scheduleStartHour = sched.startHour
+            scheduleEndHour = sched.endHour
+        } else {
+            scheduleEnabled = false
+        }
         reloadInstalledApps(for: rule.type)
         selectApp(rule.targetAppBundleID)
         selectedProfile = rule.targetProfile
@@ -244,7 +347,7 @@ struct RuleBuilderSheet: View {
 
     private func reloadInstalledApps(for routeType: RouteType) {
         let scheme = (routeType == .mail) ? "mailto" : "https"
-        availableApps = AppDiscoveryService.shared.getAvailableHandlers(for: scheme)
+        availableApps = AppDiscoveryService.shared.getAvailableHandlers(for: scheme, sortRunningFirst: false)
         if !availableApps.contains(where: { $0.bundleID == selectedAppBundleID }),
            let first = availableApps.first {
             selectApp(first.bundleID)
@@ -269,6 +372,17 @@ struct RuleBuilderSheet: View {
             ? "\(sourceOrValue) → \(appName)"
             : name
 
+        let schedule: RuleSchedule? = scheduleEnabled
+            ? RuleSchedule(
+                isEnabled: true,
+                daysOfWeek: scheduleDays,
+                startHour: scheduleStartHour,
+                startMinute: 0,
+                endHour: scheduleEndHour,
+                endMinute: 0
+            )
+            : nil
+
         let rule = RoutingRule(
             id: existingRule?.id ?? UUID(),
             name: finalName,
@@ -280,6 +394,8 @@ struct RuleBuilderSheet: View {
             targetAppBundleID: selectedAppBundleID,
             targetAppName: appName,
             targetProfile: selectedProfile,
+            openInPrivateMode: openInPrivateMode,
+            schedule: schedule,
             isEnabled: existingRule?.isEnabled ?? true
         )
         onSave(rule)

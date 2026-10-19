@@ -1,4 +1,4 @@
-.PHONY: all build app install run test clean
+.PHONY: all build app dmg install run test clean
 
 all: app
 
@@ -7,6 +7,9 @@ build:
 
 app:
 	./scripts/bundle_app.sh release
+
+dmg: app
+	./scripts/package_dmg.sh
 
 install: app
 	pkill -f "maxguspicker1824.app" || true
@@ -25,3 +28,4 @@ test:
 clean:
 	swift package clean
 	rm -rf build
+
