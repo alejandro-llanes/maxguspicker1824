@@ -7,7 +7,6 @@ struct RulesManagerView: View {
     @ViewState private var selectedFilter: RouteType? = nil // nil = All
     @ViewState private var editingRule: RoutingRule? = nil
     @ViewState private var isShowingNewRuleSheet = false
-    @ViewState private var isShowingFeatureSettingsSheet = false
     @ViewState private var testInput: String
 
     init(initialTestInput: String = "") {
@@ -132,20 +131,6 @@ struct RulesManagerView: View {
                 .menuStyle(.borderedButton)
                 .controlSize(.large)
                 .fixedSize()
-
-                // Features & Chooser UX Settings Button
-                Button {
-                    if let appDelegate = NSApp.delegate as? AppDelegate {
-                        appDelegate.showOnboardingWindow(initialTab: .features)
-                    } else {
-                        isShowingFeatureSettingsSheet = true
-                    }
-                } label: {
-                    Label("Features & UX", systemImage: "slider.horizontal.3")
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.large)
-                .help("Configure Chooser UX & Enable/Disable Advanced Features")
 
                 // Export / Import Rules Menu
                 Menu {
@@ -287,9 +272,6 @@ struct RulesManagerView: View {
                     store.rules[idx] = updatedRule
                 }
             }
-        }
-        .sheet(isPresented: $isShowingFeatureSettingsSheet) {
-            OnboardingWizardView(initialTab: .features)
         }
     }
 
