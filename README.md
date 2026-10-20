@@ -15,10 +15,10 @@
   <img src="https://img.shields.io/badge/license-MIT-green" alt="License" />
 </p>
 
-**Maxgus Picker 1824** (`maxguspicker1824`) is a fast, native, menu-bar macOS utility inspired by Bumpr, Choosy, and Velja. When registered as your default web browser and default email reader, it intercepts every `http`, `https`, and `mailto` link you click across macOS, sanitizes tracking parameters, unwraps nested redirects, and decides how to open the link in milliseconds:
+**Maxgus Picker 1824** (`maxguspicker1824`) is a fast, native, menu-bar macOS utility built for users with **multi-account setups** who maintain separate contexts, workspaces, or identities across different browsers, browser profiles, or email clients. When registered as your default web browser and default email reader, it intercepts every `http`, `https`, and `mailto` link you click across macOS, sanitizes tracking parameters, unwraps nested redirects, and routes the link to the right identity or browser in milliseconds:
 
 - **Matches an Active Rule?** Automatically routes the link in the background to your configured browser, specific **Browser Profile / Space**, **Private / Incognito window**, or **Mail Client**.
-- **No Rule Match (or `Option ⌥` Held)?** Spawns a desktop-scaled, draggable, keyboard-navigable **Floating App Selector** right on your active Space (including over Full-Screen apps) so you can choose the target app with your mouse, arrow keys, or `1`–`9` number hotkeys.
+- **No Rule Match (or `Option ⌥` Held)?** Spawns a desktop-scaled, draggable, keyboard-navigable **Floating App Selector** right on your active Space (including over Full-Screen apps) so you can choose the target app or identity with your mouse, arrow keys, or `1`–`9` number hotkeys.
 
 ---
 
