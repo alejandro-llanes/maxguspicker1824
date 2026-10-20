@@ -300,7 +300,7 @@ struct RuleBuilderSheet: View {
             }
             .padding(20)
         }
-        .frame(width: 660, height: 640)
+        .frame(width: 660, height: 730)
         .onAppear {
             setupInitialState()
         }

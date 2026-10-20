@@ -19,6 +19,13 @@ final class AppDiscoveryService {
         let appURLs = NSWorkspace.shared.urlsForApplications(toOpen: probeURL)
         let myBundleID = Bundle.main.bundleIdentifier ?? "com.maxguspicker1824.app"
         let runningBundleIDs = Set(NSWorkspace.shared.runningApplications.compactMap(\.bundleIdentifier))
+        let excludedWebNonBrowsers: Set<String> = [
+            "io.mpv",
+            "org.videolan.vlc",
+            "com.colliderli.iina",
+            "com.openai.chat"
+        ]
+        let isWebScheme = (scheme.lowercased() == "http" || scheme.lowercased() == "https")
 
         var seenBundleIDs = Set<String>()
         var targets: [AppTarget] = appURLs.compactMap { appURL in
@@ -26,6 +33,7 @@ final class AppDiscoveryService {
                   let bundleID = bundle.bundleIdentifier,
                   bundleID != myBundleID,
                   bundleID != "com.maxguspicker1824.app",
+                  !(isWebScheme && excludedWebNonBrowsers.contains(bundleID)),
                   !seenBundleIDs.contains(bundleID) else {
                 return nil
             }

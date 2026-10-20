@@ -8,6 +8,7 @@ final class PickerSelectionModel: ObservableObject {
     @Published var selectedIndex: Int = 0
     @Published var isURLPreviewExpanded: Bool = false
     @Published var didCopyURL: Bool = false
+    @Published var isPrivateModePreview: Bool = false
     let apps: [AppTarget]
     let url: URL
 
@@ -121,6 +122,23 @@ struct FloatingSelectorView: View {
                 }
                 .buttonStyle(.plain)
                 .help("Copy clean URL to clipboard (⌘C)")
+
+                if selectionModel.isPrivateModePreview {
+                    HStack(spacing: 4) {
+                        Image(systemName: "eyeglasses")
+                            .font(.system(size: 10, weight: .bold))
+                        Text("Private Mode")
+                            .font(.caption2.weight(.bold))
+                    }
+                    .foregroundStyle(.orange)
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 4)
+                    .background(
+                        Capsule()
+                            .fill(Color.orange.opacity(0.18))
+                            .overlay(Capsule().strokeBorder(Color.orange.opacity(0.45), lineWidth: 1))
+                    )
+                }
 
                 Spacer(minLength: 4)
 

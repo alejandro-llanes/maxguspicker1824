@@ -239,8 +239,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
-        localKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+        localKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .flagsChanged]) { [weak self] event in
             guard let self = self, let model = self.pickerSelectionModel, self.pickerPanel != nil else {
+                return event
+            }
+
+            if event.type == .flagsChanged {
+                model.isPrivateModePreview = event.modifierFlags.contains(.shift)
                 return event
             }
 

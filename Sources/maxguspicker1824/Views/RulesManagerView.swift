@@ -7,7 +7,11 @@ struct RulesManagerView: View {
     @ViewState private var selectedFilter: RouteType? = nil // nil = All
     @ViewState private var editingRule: RoutingRule? = nil
     @ViewState private var isShowingNewRuleSheet = false
-    @ViewState private var testInput: String = ""
+    @ViewState private var testInput: String
+
+    init(initialTestInput: String = "") {
+        _testInput = ViewState(initialValue: initialTestInput)
+    }
 
     var filteredRules: [RoutingRule] {
         guard let filter = selectedFilter else { return store.rules }
@@ -297,14 +301,32 @@ struct RuleRowCard: View {
             .toggleStyle(.switch)
             .labelsHidden()
 
-            // Left: Rule Name & Condition Badge
-            VStack(alignment: .leading, spacing: 4) {
+            // Left: Rule Name & Condition Badges
+            VStack(alignment: .leading, spacing: 5) {
                 HStack(spacing: 8) {
                     Image(systemName: rule.type.icon)
                         .foregroundStyle(rule.type == .web ? .blue : .orange)
                     Text(rule.name)
                         .font(.headline)
                         .strikethrough(!rule.isEnabled)
+
+                    if let sched = rule.schedule, sched.isEnabled {
+                        Label(sched.displaySummary, systemImage: "clock.badge.checkmark")
+                            .font(.caption2.weight(.semibold))
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 2)
+                            .background(Color.purple.opacity(0.15), in: Capsule())
+                            .foregroundStyle(.purple)
+                    }
+
+                    if rule.openInPrivateMode {
+                        Label("Private", systemImage: "eyeglasses")
+                            .font(.caption2.weight(.semibold))
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 2)
+                            .background(Color.orange.opacity(0.16), in: Capsule())
+                            .foregroundStyle(.orange)
+                    }
                 }
 
                 Text(rule.summarySentence)
