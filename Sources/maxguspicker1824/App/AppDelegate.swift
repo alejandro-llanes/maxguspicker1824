@@ -66,6 +66,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         showRulesWindow()
     }
 
+    func reopenActivityRecord(_ record: ActivityRecord, showChooser: Bool = false) {
+        guard let url = URL(string: record.urlString) else {
+            NSSound.beep()
+            return
+        }
+        if showChooser {
+            showFloatingPicker(for: url, sourceApp: record.sourceApp)
+            return
+        }
+        guard let appURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: record.targetAppBundleID) else {
+            showFloatingPicker(for: url, sourceApp: record.sourceApp)
+            return
+        }
+        let icon = NSWorkspace.shared.icon(forFile: appURL.path)
+        let target = AppTarget(
+            bundleID: record.targetAppBundleID,
+            name: record.targetAppName,
+            appURL: appURL,
+            icon: icon,
+            profile: record.targetProfile,
+            openInPrivateMode: record.openedInPrivateMode
+        )
+        RulesStore.shared.logActivity(url: url, source: record.sourceApp, target: target)
+        AppDiscoveryService.shared.open(url, with: target)
+    }
+
+    func copyActivityRecordURL(_ record: ActivityRecord) {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(record.urlString, forType: .string)
+    }
+
     func showOnboardingWindow(initialTab: SetupWindowTab = .permissions) {
         UserDefaults.standard.set(true, forKey: "HasCompletedOnboarding")
         let onboardingView = OnboardingWizardView(initialTab: initialTab)

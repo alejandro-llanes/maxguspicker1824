@@ -80,13 +80,33 @@ struct MaxgusPicker1824App: App {
             }
             .keyboardShortcut(",", modifiers: .command)
 
-            // Recent Routed Links Submenu (allows creating rules directly from history)
+            // Recent Routed Links Submenu (allows reopening URLs or creating rules directly from history)
             Menu {
                 if store.recentActivity.isEmpty {
                     Text("No links routed yet")
                 } else {
                     ForEach(store.recentActivity) { record in
                         Menu(record.displaySummary) {
+                            Button {
+                                appDelegate.reopenActivityRecord(record, showChooser: false)
+                            } label: {
+                                Label("Reopen URL in \(record.destinationDisplayTitle)", systemImage: "arrow.clockwise.circle")
+                            }
+
+                            Button {
+                                appDelegate.reopenActivityRecord(record, showChooser: true)
+                            } label: {
+                                Label("Reopen URL in Floating Chooser...", systemImage: "hand.tap")
+                            }
+
+                            Button {
+                                appDelegate.copyActivityRecordURL(record)
+                            } label: {
+                                Label("Copy URL (\(record.urlString))", systemImage: "doc.on.doc")
+                            }
+
+                            Divider()
+
                             Button {
                                 appDelegate.openRuleBuilderFromHistory(record)
                             } label: {

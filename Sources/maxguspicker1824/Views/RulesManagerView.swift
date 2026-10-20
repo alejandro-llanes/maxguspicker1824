@@ -91,17 +91,33 @@ struct RulesManagerView: View {
                 .controlSize(.large)
                 .fixedSize()
 
-                // Create Rule from History Menu
+                // Create Rule or Reopen from History Menu
                 Menu {
                     if store.recentActivity.isEmpty {
                         Text("No previously opened links yet")
                     } else {
-                        Section("Select a previously opened link to create a rule:") {
+                        Section("Recent Routed Links:") {
                             ForEach(store.recentActivity) { record in
-                                Button {
-                                    store.draftRuleFromHistory = record.toRoutingRule()
-                                } label: {
-                                    Text(record.displaySummary)
+                                Menu(record.displaySummary) {
+                                    Button {
+                                        (NSApp.delegate as? AppDelegate)?.reopenActivityRecord(record, showChooser: false)
+                                    } label: {
+                                        Label("Reopen URL in \(record.destinationDisplayTitle)", systemImage: "arrow.clockwise.circle")
+                                    }
+
+                                    Button {
+                                        (NSApp.delegate as? AppDelegate)?.reopenActivityRecord(record, showChooser: true)
+                                    } label: {
+                                        Label("Reopen URL in Floating Chooser...", systemImage: "hand.tap")
+                                    }
+
+                                    Divider()
+
+                                    Button {
+                                        store.draftRuleFromHistory = record.toRoutingRule()
+                                    } label: {
+                                        Label("Create Rule in Editor...", systemImage: "slider.horizontal.3")
+                                    }
                                 }
                             }
                         }
