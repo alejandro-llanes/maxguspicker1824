@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/screenshots/app-icon.png" alt="Maxgus Picker 1824 Icon" width="128" />
+</p>
+
 # maxguspicker1824
 
 > **A native macOS Link & Mail Router with Multi-Browser Profile Support, Source-App Detection, URL Sanitization, Native Desktop App Handoff, and a Visual Rule Engine.**

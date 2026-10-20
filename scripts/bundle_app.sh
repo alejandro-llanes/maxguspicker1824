@@ -25,6 +25,9 @@ mkdir -p "${MACOS_DIR}" "${RESOURCES_DIR}"
 cp "${BIN_PATH}" "${MACOS_DIR}/${APP_NAME}"
 chmod +x "${MACOS_DIR}/${APP_NAME}"
 cp "Resources/Info.plist" "${CONTENTS_DIR}/Info.plist"
+if [ -f "Resources/AppIcon.icns" ]; then
+    cp "Resources/AppIcon.icns" "${RESOURCES_DIR}/AppIcon.icns"
+fi
 
 if [ -n "${VERSION:-}" ]; then
     CLEAN_VERSION="${VERSION#v}"
@@ -36,6 +39,7 @@ printf "APPL????" > "${CONTENTS_DIR}/PkgInfo"
 
 echo "==> Signing ${APP_BUNDLE} with entitlements..."
 codesign --force --deep --sign - --entitlements "Resources/${APP_NAME}.entitlements" "${APP_BUNDLE}"
+touch "${APP_BUNDLE}"
 
 echo "==> Done! Application bundle created at: ${APP_BUNDLE}"
 

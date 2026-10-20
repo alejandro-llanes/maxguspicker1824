@@ -27,6 +27,13 @@ mkdir -p "${STAGING_DIR}"
 
 cp -R "${APP_BUNDLE}" "${STAGING_DIR}/${APP_NAME}.app"
 ln -s /Applications "${STAGING_DIR}/Applications"
+if [ -f "Resources/AppIcon.icns" ]; then
+    cp "Resources/AppIcon.icns" "${STAGING_DIR}/.VolumeIcon.icns"
+    if command -v SetFile >/dev/null 2>&1; then
+        SetFile -c icnC "${STAGING_DIR}/.VolumeIcon.icns" || true
+        SetFile -a C "${STAGING_DIR}" || true
+    fi
+fi
 
 echo "==> Creating compressed DMG (${DMG_VERSIONED})..."
 hdiutil create \
