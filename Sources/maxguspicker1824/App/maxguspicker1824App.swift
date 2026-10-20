@@ -123,6 +123,12 @@ struct MaxgusPicker1824App: App {
                 Label("System Setup & Permissions...", systemImage: "gearshape.2")
             }
 
+            Button {
+                appDelegate.showOnboardingWindow(initialTab: .about)
+            } label: {
+                Label("About Maxgus Picker 1824 (\(systemService.versionBadgeText))...", systemImage: "info.circle")
+            }
+
             Divider()
 
             Button("Quit maxguspicker1824") {

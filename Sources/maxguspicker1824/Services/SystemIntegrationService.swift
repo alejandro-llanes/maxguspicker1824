@@ -13,6 +13,22 @@ final class SystemIntegrationService: ObservableObject {
     @Published var hasAccessibilityPermission: Bool = false
     @Published var isLaunchAtLoginEnabled: Bool = false
 
+    var appVersion: String {
+        (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "1.1.1"
+    }
+
+    var buildNumber: String {
+        (Bundle.main.infoDictionary?["CFBundleVersion"] as? String) ?? "3"
+    }
+
+    var versionBadgeText: String {
+        "v\(appVersion)"
+    }
+
+    var fullVersionDisplay: String {
+        "Version \(appVersion) (Build \(buildNumber))"
+    }
+
     private var timer: Timer?
     private let myBundleID = Bundle.main.bundleIdentifier ?? "com.maxguspicker1824.app"
 

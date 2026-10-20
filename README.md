@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-1.1.0-purple" alt="Version" />
+  <img src="https://img.shields.io/badge/version-1.1.1-purple" alt="Version" />
   <img src="https://img.shields.io/badge/platform-macOS%2014%2B%20(Sonoma%2B)-blue" alt="Platform" />
   <img src="https://img.shields.io/badge/Swift-5.9%2B%20%7C%206.x-F05138?logo=swift&logoColor=white" alt="Swift" />
   <img src="https://img.shields.io/badge/UI-AppKit%20%2B%20SwiftUI-0A84FF" alt="UI" />

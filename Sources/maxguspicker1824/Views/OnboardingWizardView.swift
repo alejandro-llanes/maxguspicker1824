@@ -3,7 +3,8 @@ import SwiftUI
 
 enum SetupWindowTab: String, CaseIterable, Identifiable {
     case permissions = "System Setup"
-    case features = "Features & Chooser UX"
+    case features = "Features & UX"
+    case about = "About"
 
     var id: String { rawValue }
 
@@ -11,6 +12,7 @@ enum SetupWindowTab: String, CaseIterable, Identifiable {
         switch self {
         case .permissions: return "checkmark.shield.fill"
         case .features: return "slider.horizontal.3"
+        case .about: return "info.circle.fill"
         }
     }
 }
@@ -43,22 +45,36 @@ struct OnboardingWizardView: View {
                     .shadow(color: .blue.opacity(0.25), radius: 6, y: 3)
 
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Maxgus Picker 1824")
-                        .font(.headline.bold())
+                    HStack(spacing: 8) {
+                        Text("Maxgus Picker 1824")
+                            .font(.headline.bold())
+
+                        Text(systemService.versionBadgeText)
+                            .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                            .foregroundStyle(.blue)
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 2)
+                            .background(Color.blue.opacity(0.14), in: Capsule())
+                            .overlay(
+                                Capsule().strokeBorder(Color.blue.opacity(0.35), lineWidth: 1)
+                            )
+                    }
                     Text("System permissions, multi-account features & Floating Chooser customization")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                        .lineLimit(1)
                 }
 
                 Spacer()
 
                 Picker("", selection: $selectedTab) {
                     ForEach(SetupWindowTab.allCases) { tab in
-                        Label(tab.rawValue, systemImage: tab.icon).tag(tab)
+                        Text(tab.rawValue).tag(tab)
                     }
                 }
+                .labelsHidden()
                 .pickerStyle(.segmented)
-                .frame(width: 310)
+                .frame(width: 300)
             }
             .padding(.horizontal, 24)
             .padding(.vertical, 16)
@@ -67,17 +83,21 @@ struct OnboardingWizardView: View {
             Divider()
 
             // Main Content
-            if selectedTab == .permissions {
+            switch selectedTab {
+            case .permissions:
                 permissionsTabContent
-            } else {
+            case .features:
                 FeatureSettingsView()
+            case .about:
+                AboutAppView()
             }
 
             Divider()
 
             // Bottom Status Bar
             HStack {
-                if selectedTab == .permissions {
+                switch selectedTab {
+                case .permissions:
                     if systemService.isDefaultBrowser && systemService.isDefaultMailClient {
                         Label("All essential permissions configured!", systemImage: "checkmark.seal.fill")
                             .foregroundStyle(.green)
@@ -93,7 +113,7 @@ struct OnboardingWizardView: View {
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
-                } else {
+                case .features:
                     Label("Changes take effect immediately in the Floating Chooser & Rule Engine", systemImage: "sparkles")
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -103,6 +123,14 @@ struct OnboardingWizardView: View {
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
+                case .about:
+                    Label("Running \(systemService.fullVersionDisplay)", systemImage: "checkmark.seal.fill")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Text("MIT License • Built with Swift & AppKit/SwiftUI")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
             }
             .padding(.vertical, 12)
@@ -572,3 +600,133 @@ struct OnboardingStepCard: View {
         )
     }
 }
+
+struct AboutAppView: View {
+    @ObservedObject var systemService = SystemIntegrationService.shared
+    @ObservedObject var store = RulesStore.shared
+    @ViewState private var didCopyVersion = false
+
+    private var appIconImage: NSImage {
+        if let icon = NSApp.applicationIconImage {
+            return icon
+        }
+        return NSImage(systemSymbolName: "arrow.triangle.branch", accessibilityDescription: nil) ?? NSImage()
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 18) {
+                // Hero App Identity & Version Card
+                VStack(spacing: 10) {
+                    Image(nsImage: appIconImage)
+                        .resizable()
+                        .interpolation(.high)
+                        .frame(width: 84, height: 84)
+                        .shadow(color: .blue.opacity(0.3), radius: 10, y: 4)
+
+                    Text("Maxgus Picker 1824")
+                        .font(.title2.bold())
+
+                    HStack(spacing: 8) {
+                        Label(systemService.fullVersionDisplay, systemImage: "tag.fill")
+                            .font(.system(.subheadline, design: .monospaced).weight(.semibold))
+                            .foregroundStyle(.blue)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 5)
+                            .background(Color.blue.opacity(0.14), in: Capsule())
+                            .overlay(
+                                Capsule().strokeBorder(Color.blue.opacity(0.35), lineWidth: 1)
+                            )
+
+                        Button {
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general.setString(
+                                "Maxgus Picker 1824 — \(systemService.fullVersionDisplay) (macOS \(ProcessInfo.processInfo.operatingSystemVersionString))",
+                                forType: .string
+                            )
+                            withAnimation(.easeInOut(duration: 0.15)) {
+                                didCopyVersion = true
+                            }
+                        } label: {
+                            Label(didCopyVersion ? "Copied" : "Copy Info", systemImage: didCopyVersion ? "checkmark" : "doc.on.doc")
+                                .font(.caption.weight(.semibold))
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                    }
+
+                    Text("Native macOS Link & Mail Router built for multi-account and multi-identity browser workflows.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 32)
+                }
+                .padding(.top, 8)
+
+                // Runtime & System Status Grid
+                GroupBox {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Label("Runtime & Configuration Summary", systemImage: "cpu")
+                            .font(.headline)
+
+                        Divider()
+
+                        AboutInfoRow(label: "Running Version", value: systemService.fullVersionDisplay, isMonospaced: true)
+                        AboutInfoRow(label: "Bundle Identifier", value: Bundle.main.bundleIdentifier ?? "com.maxguspicker1824.app", isMonospaced: true)
+                        AboutInfoRow(label: "macOS Version", value: ProcessInfo.processInfo.operatingSystemVersionString, isMonospaced: false)
+                        AboutInfoRow(label: "Default Web Browser", value: systemService.isDefaultBrowser ? "Active (Intercepting HTTP/HTTPS)" : "Not Set", isHighlighted: systemService.isDefaultBrowser)
+                        AboutInfoRow(label: "Active Identity Context", value: store.activeContext.rawValue, isMonospaced: false)
+                        AboutInfoRow(label: "Configured Routing Rules", value: "\(store.rules.filter(\.isEnabled).count) active (\(store.rules.count) total)", isMonospaced: false)
+                        AboutInfoRow(label: "Pinned Browser Profiles", value: "\(store.pinnedProfiles.count) pinned", isMonospaced: false)
+                    }
+                    .padding(8)
+                }
+
+                // Quick Links
+                HStack(spacing: 12) {
+                    if let repoURL = URL(string: "https://github.com/alejandro-llanes/maxguspicker1824") {
+                        Link(destination: repoURL) {
+                            Label("GitHub Repository", systemImage: "link")
+                        }
+                        .buttonStyle(.bordered)
+                    }
+
+                    if let releasesURL = URL(string: "https://github.com/alejandro-llanes/maxguspicker1824/releases") {
+                        Link(destination: releasesURL) {
+                            Label("Check Releases & Updates", systemImage: "arrow.down.circle")
+                        }
+                        .buttonStyle(.bordered)
+                    }
+
+                    if let issuesURL = URL(string: "https://github.com/alejandro-llanes/maxguspicker1824/issues") {
+                        Link(destination: issuesURL) {
+                            Label("Report an Issue", systemImage: "ladybug")
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                }
+            }
+            .padding(22)
+        }
+    }
+}
+
+private struct AboutInfoRow: View {
+    let label: String
+    let value: String
+    var isMonospaced: Bool = false
+    var isHighlighted: Bool = false
+
+    var body: some View {
+        HStack {
+            Text(label)
+                .font(.caption.weight(.medium))
+                .foregroundStyle(.secondary)
+            Spacer()
+            Text(value)
+                .font(isMonospaced ? .system(.caption, design: .monospaced).weight(.semibold) : .caption.weight(.semibold))
+                .foregroundStyle(isHighlighted ? .green : .primary)
+        }
+    }
+}
+
