@@ -13,6 +13,7 @@ struct RuleBuilderSheet: View {
     @ViewState private var name: String = ""
     @ViewState private var type: RouteType = .web
     @ViewState private var selectedSourceApp: SourceAppInfo? = nil
+    @ViewState private var contextFilter: IdentityContext = .all
     @ViewState private var field: MatchField = .domain
     @ViewState private var matchOperator: MatchOperator = .contains
     @ViewState private var value: String = ""
@@ -22,6 +23,12 @@ struct RuleBuilderSheet: View {
     @ViewState private var scheduleDays: Set<Int> = [2, 3, 4, 5, 6]
     @ViewState private var scheduleStartHour: Int = 9
     @ViewState private var scheduleEndHour: Int = 18
+
+    // Multi-Account URL Rewrite / Google authuser state
+    @ViewState private var urlRewriteEnabled: Bool = false
+    @ViewState private var googleAuthUser: String = ""
+    @ViewState private var urlFindPattern: String = ""
+    @ViewState private var urlReplacePattern: String = ""
 
     // Destination state
     @ViewState private var availableApps: [AppTarget] = []
@@ -85,7 +92,7 @@ struct RuleBuilderSheet: View {
             Divider()
 
             ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
+                VStack(alignment: .leading, spacing: 18) {
                     // STEP 1: Link Type & Name
                     GroupBox {
                         VStack(alignment: .leading, spacing: 12) {
@@ -105,19 +112,35 @@ struct RuleBuilderSheet: View {
                                 reloadInstalledApps(for: newType)
                             }
 
-                            TextField("Rule Name (e.g. Work GitHub, Company Emails)", text: $name)
+                            TextField("Rule Name (e.g. Work GitHub, Company Google Meet)", text: $name)
                                 .textFieldStyle(.roundedBorder)
                         }
                         .padding(8)
                     }
 
-                    // STEP 2: Condition Builder + Schedule
+                    // STEP 2: Condition Builder + Context + Schedule
                     GroupBox {
                         VStack(alignment: .leading, spacing: 12) {
                             Label("2. When a link matches this condition", systemImage: "2.circle.fill")
                                 .font(.headline)
 
-                            SourceAppPickerRow(selectedSourceApp: $selectedSourceApp)
+                            HStack(spacing: 16) {
+                                SourceAppPickerRow(selectedSourceApp: $selectedSourceApp)
+
+                                if store.featureSettings.enableContextModeFiltering {
+                                    HStack(spacing: 6) {
+                                        Label("Context Mode:", systemImage: "person.2.crop.square.stack")
+                                            .font(.subheadline.weight(.medium))
+                                        Picker("", selection: $contextFilter) {
+                                            ForEach(IdentityContext.allCases) { ctx in
+                                                Label(ctx.rawValue, systemImage: ctx.icon).tag(ctx)
+                                            }
+                                        }
+                                        .labelsHidden()
+                                        .frame(width: 145)
+                                    }
+                                }
+                            }
 
                             Divider()
 
@@ -142,55 +165,57 @@ struct RuleBuilderSheet: View {
                                     .textFieldStyle(.roundedBorder)
                             }
 
-                            Divider()
-
                             // Optional Work Hours / Schedule Filter
-                            VStack(alignment: .leading, spacing: 10) {
-                                Toggle(isOn: $scheduleEnabled) {
-                                    Label("Only active during specific days & hours (Work Hours / Schedule)", systemImage: "clock.badge.checkmark")
-                                        .font(.subheadline.weight(.medium))
-                                }
-                                .toggleStyle(.checkbox)
+                            if store.featureSettings.enableTimeScheduledRules || scheduleEnabled {
+                                Divider()
 
-                                if scheduleEnabled {
-                                    HStack(spacing: 6) {
-                                        ForEach(orderedWeekdays, id: \.id) { day in
-                                            let isSelected = scheduleDays.contains(day.id)
-                                            Button {
-                                                if isSelected && scheduleDays.count > 1 {
-                                                    scheduleDays.remove(day.id)
-                                                } else {
-                                                    scheduleDays.insert(day.id)
+                                VStack(alignment: .leading, spacing: 10) {
+                                    Toggle(isOn: $scheduleEnabled) {
+                                        Label("Only active during specific days & hours (Work Hours / Schedule)", systemImage: "clock.badge.checkmark")
+                                            .font(.subheadline.weight(.medium))
+                                    }
+                                    .toggleStyle(.checkbox)
+
+                                    if scheduleEnabled {
+                                        HStack(spacing: 6) {
+                                            ForEach(orderedWeekdays, id: \.id) { day in
+                                                let isSelected = scheduleDays.contains(day.id)
+                                                Button {
+                                                    if isSelected && scheduleDays.count > 1 {
+                                                        scheduleDays.remove(day.id)
+                                                    } else {
+                                                        scheduleDays.insert(day.id)
+                                                    }
+                                                } label: {
+                                                    Text(day.label)
+                                                        .font(.caption.weight(.semibold))
+                                                        .padding(.horizontal, 8)
+                                                        .padding(.vertical, 4)
+                                                        .background(
+                                                            Capsule()
+                                                                .fill(isSelected ? Color.accentColor : Color.secondary.opacity(0.15))
+                                                        )
+                                                        .foregroundStyle(isSelected ? .white : .primary)
                                                 }
-                                            } label: {
-                                                Text(day.label)
-                                                    .font(.caption.weight(.semibold))
-                                                    .padding(.horizontal, 8)
-                                                    .padding(.vertical, 4)
-                                                    .background(
-                                                        Capsule()
-                                                            .fill(isSelected ? Color.accentColor : Color.secondary.opacity(0.15))
-                                                    )
-                                                    .foregroundStyle(isSelected ? .white : .primary)
+                                                .buttonStyle(.plain)
                                             }
-                                            .buttonStyle(.plain)
-                                        }
 
-                                        Spacer()
+                                            Spacer()
 
-                                        Picker("From", selection: $scheduleStartHour) {
-                                            ForEach(0..<24, id: \.self) { hour in
-                                                Text(String(format: "%02d:00", hour)).tag(hour)
+                                            Picker("From", selection: $scheduleStartHour) {
+                                                ForEach(0..<24, id: \.self) { hour in
+                                                    Text(String(format: "%02d:00", hour)).tag(hour)
+                                                }
                                             }
-                                        }
-                                        .frame(width: 110)
+                                            .frame(width: 110)
 
-                                        Picker("To", selection: $scheduleEndHour) {
-                                            ForEach(0..<24, id: \.self) { hour in
-                                                Text(String(format: "%02d:00", hour)).tag(hour)
+                                            Picker("To", selection: $scheduleEndHour) {
+                                                ForEach(0..<24, id: \.self) { hour in
+                                                    Text(String(format: "%02d:00", hour)).tag(hour)
+                                                }
                                             }
+                                            .frame(width: 100)
                                         }
-                                        .frame(width: 100)
                                     }
                                 }
                             }
@@ -211,7 +236,7 @@ struct RuleBuilderSheet: View {
                         .padding(8)
                     }
 
-                    // STEP 3: Target App, Profile & Private Mode
+                    // STEP 3: Target App, Profile, Private Mode & Multi-Account URL Rewriting
                     GroupBox {
                         VStack(alignment: .leading, spacing: 12) {
                             Label("3. Open automatically in", systemImage: "3.circle.fill")
@@ -278,6 +303,45 @@ struct RuleBuilderSheet: View {
                                     Spacer()
                                 }
                             }
+
+                            // Multi-Account URL Rewriting & Google authuser Injection
+                            if type == .web && (store.featureSettings.enableURLRewriteRules || urlRewriteEnabled) {
+                                Divider().padding(.vertical, 4)
+                                VStack(alignment: .leading, spacing: 10) {
+                                    Toggle(isOn: $urlRewriteEnabled) {
+                                        Label("Multi-Account URL Transformation (Google authuser / Domain Rewrite)", systemImage: "arrow.triangle.2.circlepath.circle")
+                                            .font(.subheadline.weight(.medium))
+                                    }
+                                    .toggleStyle(.checkbox)
+
+                                    if urlRewriteEnabled {
+                                        VStack(alignment: .leading, spacing: 8) {
+                                            HStack(spacing: 10) {
+                                                Label("Google Account (`authuser`):", systemImage: "person.badge.key.fill")
+                                                    .font(.caption.weight(.semibold))
+                                                    .frame(width: 185, alignment: .leading)
+                                                TextField("Optional: you@company.com or account index (0, 1, 2)", text: $googleAuthUser)
+                                                    .textFieldStyle(.roundedBorder)
+                                            }
+
+                                            HStack(spacing: 10) {
+                                                Label("Replace in URL:", systemImage: "magnifyingglass")
+                                                    .font(.caption.weight(.semibold))
+                                                    .frame(width: 185, alignment: .leading)
+                                                TextField("Find substring (e.g. old.wiki.com)", text: $urlFindPattern)
+                                                    .textFieldStyle(.roundedBorder)
+                                                Image(systemName: "arrow.right")
+                                                    .font(.caption)
+                                                    .foregroundStyle(.secondary)
+                                                TextField("Replace with (e.g. new.wiki.com)", text: $urlReplacePattern)
+                                                    .textFieldStyle(.roundedBorder)
+                                            }
+                                        }
+                                        .padding(10)
+                                        .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+                                    }
+                                }
+                            }
                         }
                         .padding(8)
                     }
@@ -300,7 +364,7 @@ struct RuleBuilderSheet: View {
             }
             .padding(20)
         }
-        .frame(width: 660, height: 730)
+        .frame(minWidth: 680, minHeight: 820)
         .onAppear {
             setupInitialState()
         }
@@ -328,6 +392,7 @@ struct RuleBuilderSheet: View {
         name = rule.name
         type = rule.type
         selectedSourceApp = rule.sourceApp
+        contextFilter = rule.contextFilter ?? .all
         field = rule.field
         matchOperator = rule.matchOperator
         value = rule.value
@@ -340,6 +405,13 @@ struct RuleBuilderSheet: View {
         } else {
             scheduleEnabled = false
         }
+        let hasAuth = !(rule.googleAuthUser ?? "").isEmpty
+        let hasFind = !(rule.urlFindPattern ?? "").isEmpty
+        urlRewriteEnabled = hasAuth || hasFind
+        googleAuthUser = rule.googleAuthUser ?? ""
+        urlFindPattern = rule.urlFindPattern ?? ""
+        urlReplacePattern = rule.urlReplacePattern ?? ""
+
         reloadInstalledApps(for: rule.type)
         selectApp(rule.targetAppBundleID)
         selectedProfile = rule.targetProfile
@@ -347,7 +419,12 @@ struct RuleBuilderSheet: View {
 
     private func reloadInstalledApps(for routeType: RouteType) {
         let scheme = (routeType == .mail) ? "mailto" : "https"
-        availableApps = AppDiscoveryService.shared.getAvailableHandlers(for: scheme, sortRunningFirst: false)
+        availableApps = AppDiscoveryService.shared.getAvailableHandlers(
+            for: scheme,
+            sortRunningFirst: false,
+            includeNativeHandoff: false,
+            pinnedProfiles: []
+        )
         if !availableApps.contains(where: { $0.bundleID == selectedAppBundleID }),
            let first = availableApps.first {
             selectApp(first.bundleID)
@@ -383,11 +460,16 @@ struct RuleBuilderSheet: View {
             )
             : nil
 
+        let trimmedAuth = googleAuthUser.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedFind = urlFindPattern.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedReplace = urlReplacePattern.trimmingCharacters(in: .whitespacesAndNewlines)
+
         let rule = RoutingRule(
             id: existingRule?.id ?? UUID(),
             name: finalName,
             type: type,
             sourceApp: selectedSourceApp,
+            contextFilter: (contextFilter == .all) ? nil : contextFilter,
             field: field,
             matchOperator: matchOperator,
             value: cleanValue,
@@ -396,6 +478,11 @@ struct RuleBuilderSheet: View {
             targetProfile: selectedProfile,
             openInPrivateMode: openInPrivateMode,
             schedule: schedule,
+            googleAuthUser: (urlRewriteEnabled && !trimmedAuth.isEmpty) ? trimmedAuth : nil,
+            urlFindPattern: (urlRewriteEnabled && !trimmedFind.isEmpty) ? trimmedFind : nil,
+            urlReplacePattern: (urlRewriteEnabled && !trimmedFind.isEmpty) ? trimmedReplace : nil,
+            hitCount: existingRule?.hitCount ?? 0,
+            lastMatchedAt: existingRule?.lastMatchedAt,
             isEnabled: existingRule?.isEnabled ?? true
         )
         onSave(rule)
@@ -455,9 +542,7 @@ struct SourceAppPickerRow: View {
                     }
                 }
             }
-            .frame(maxWidth: 240)
-
-            Spacer()
+            .frame(maxWidth: 210)
         }
     }
 

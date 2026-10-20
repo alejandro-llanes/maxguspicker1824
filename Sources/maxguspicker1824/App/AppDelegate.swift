@@ -22,7 +22,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if !UserDefaults.standard.bool(forKey: "HasCompletedOnboarding") {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
                 guard let self = self, !self.receivedURLOnLaunch else { return }
-                self.showOnboardingWindow()
+                self.showOnboardingWindow(initialTab: .permissions)
             }
         }
     }
@@ -39,7 +39,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    // MARK: - Explicit Window Management (Rules Editor & Onboarding)
+    // MARK: - Explicit Window Management (Rules Editor & Setup/Features)
 
     func showRulesWindow() {
         if let window = rulesWindow {
@@ -52,7 +52,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let window = NSWindow(contentViewController: hostingController)
         window.title = "Routing Rules"
         window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
-        window.setContentSize(NSSize(width: 900, height: 600))
+        window.setContentSize(NSSize(width: 940, height: 620))
         window.center()
         window.isReleasedWhenClosed = false
         self.rulesWindow = window
@@ -66,20 +66,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         showRulesWindow()
     }
 
-    func showOnboardingWindow() {
+    func showOnboardingWindow(initialTab: SetupWindowTab = .permissions) {
         UserDefaults.standard.set(true, forKey: "HasCompletedOnboarding")
+        let onboardingView = OnboardingWizardView(initialTab: initialTab)
+        let hostingController = NSHostingController(rootView: onboardingView)
+
         if let window = onboardingWindow {
+            window.contentViewController = hostingController
             window.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
             return
         }
 
-        let onboardingView = OnboardingWizardView()
-        let hostingController = NSHostingController(rootView: onboardingView)
         let window = NSWindow(contentViewController: hostingController)
-        window.title = "Maxgus Picker 1824"
+        window.title = "Maxgus Picker 1824 — Setup & Features"
         window.styleMask = [.titled, .closable]
-        window.setContentSize(NSSize(width: 580, height: 590))
+        window.setContentSize(NSSize(width: 660, height: 640))
         window.center()
         window.isReleasedWhenClosed = false
         self.onboardingWindow = window
@@ -88,35 +90,64 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.activate(ignoringOtherApps: true)
     }
 
-    // MARK: - Active Browser Tab Handoff
+    // MARK: - Active Browser Tab & Clipboard Handoff
 
     func rerouteActiveBrowserTab() {
         guard let activeURL = AppDiscoveryService.shared.fetchActiveBrowserTabURL() else {
             NSSound.beep()
             return
         }
-        let cleanedURL = RulesStore.shared.sanitizeURLsEnabled
+        let cleanedURL = RulesStore.shared.featureSettings.sanitizeURLsEnabled
             ? URLSanitizerService.shared.sanitize(activeURL)
             : activeURL
         let sourceApp = SourceAppDetector.shared.detectCurrentSourceApp()
         showFloatingPicker(for: cleanedURL, sourceApp: sourceApp)
     }
 
+    func routeClipboardURL() {
+        guard let rawString = NSPasteboard.general.string(forType: .string)?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !rawString.isEmpty,
+              let parsedURL = Self.normalizeUserURL(from: rawString) else {
+            NSSound.beep()
+            return
+        }
+        let cleanedURL = RulesStore.shared.featureSettings.sanitizeURLsEnabled
+            ? URLSanitizerService.shared.sanitize(parsedURL)
+            : parsedURL
+        showFloatingPicker(for: cleanedURL, sourceApp: nil)
+    }
+
+    static func normalizeUserURL(from raw: String) -> URL? {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, !trimmed.contains(" ") else { return nil }
+        if trimmed.lowercased().hasPrefix("mailto:") || trimmed.lowercased().hasPrefix("http://") || trimmed.lowercased().hasPrefix("https://") {
+            return URL(string: trimmed)
+        }
+        if trimmed.contains("@") && !trimmed.contains("://") && !trimmed.contains("/") {
+            return URL(string: "mailto:\(trimmed)")
+        }
+        if trimmed.contains(".") && !trimmed.contains("://") {
+            return URL(string: "https://\(trimmed)")
+        }
+        return nil
+    }
+
     // MARK: - URL Interception & Floating Selector
 
     func routeIncomingRequest(_ rawURL: URL) {
+        let store = RulesStore.shared
         // 1. Detect which app the user clicked the link in (e.g., Slack, Mail, Notion)
         let sourceApp = SourceAppDetector.shared.detectCurrentSourceApp()
 
         // 2. Sanitize URL (unwrap redirects & strip tracking parameters if enabled)
-        let url = RulesStore.shared.sanitizeURLsEnabled
+        let url = store.featureSettings.sanitizeURLsEnabled
             ? URLSanitizerService.shared.sanitize(rawURL)
             : rawURL
 
         // 3. Holding Option (⌥) bypasses rules and forces the floating selector
         let forcePicker = NSEvent.modifierFlags.contains(.option)
 
-        if !forcePicker, let matchedRule = RulesStore.shared.findMatchingRule(for: url, sourceApp: sourceApp) {
+        if !forcePicker, let matchedRule = store.findMatchingRule(for: url, sourceApp: sourceApp) {
             guard let appURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: matchedRule.targetAppBundleID) else {
                 showFloatingPicker(for: url, sourceApp: sourceApp)
                 return
@@ -130,8 +161,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 profile: matchedRule.targetProfile,
                 openInPrivateMode: matchedRule.openInPrivateMode
             )
-            RulesStore.shared.logActivity(url: url, source: sourceApp, target: target)
-            AppDiscoveryService.shared.open(url, with: target)
+            let finalURL = store.featureSettings.enableURLRewriteRules
+                ? matchedRule.transformURL(url)
+                : url
+            store.recordRuleHit(for: matchedRule.id)
+            store.logActivity(url: finalURL, source: sourceApp, target: target)
+            AppDiscoveryService.shared.open(finalURL, with: target)
             return
         }
 
@@ -139,22 +174,47 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         showFloatingPicker(for: url, sourceApp: sourceApp)
     }
 
-    func showFloatingPicker(for url: URL, sourceApp: SourceAppInfo? = nil) {
+    func showFloatingPicker(for url: URL, sourceApp: SourceAppInfo? = nil, availableApps: [AppTarget]? = nil) {
         closeFloatingPicker()
 
+        let store = RulesStore.shared
         let isMail = (url.scheme?.lowercased() == "mailto")
-        let handlers = AppDiscoveryService.shared.getAvailableHandlers(
+        let handlers = availableApps ?? AppDiscoveryService.shared.getAvailableHandlers(
             for: isMail ? "mailto" : "https",
             forURL: isMail ? nil : url,
-            sortRunningFirst: RulesStore.shared.prioritizeRunningBrowsers
+            sortRunningFirst: store.featureSettings.prioritizeRunningBrowsers,
+            includeNativeHandoff: store.featureSettings.nativeAppHandoffEnabled,
+            pinnedProfiles: (isMail || !store.featureSettings.showPinnedProfilesInChooser) ? [] : store.pinnedProfiles
         )
         let selectionModel = PickerSelectionModel(apps: handlers, url: url)
         self.pickerSelectionModel = selectionModel
 
+        // Asynchronously unfurl shortlinks (bit.ly, t.co, tinyurl.com, lnkd.in, etc.) if enabled
+        if store.featureSettings.expandShortlinksEnabled && ShortlinkExpanderService.shared.isShortlink(url) {
+            selectionModel.isExpandingShortlink = true
+            Task { @MainActor [weak selectionModel] in
+                let expanded = await ShortlinkExpanderService.shared.expand(url)
+                guard let selectionModel = selectionModel else { return }
+                selectionModel.isExpandingShortlink = false
+                if let expanded = expanded {
+                    let cleanExpanded = store.featureSettings.sanitizeURLsEnabled
+                        ? URLSanitizerService.shared.sanitize(expanded)
+                        : expanded
+                    selectionModel.expandedShortlinkURL = cleanExpanded
+                }
+            }
+        }
+
         let handleChoice: (AppTarget) -> Void = { [weak self] chosenTarget in
+            let finalURL = selectionModel.effectiveURL
+            let shouldRememberDomain = selectionModel.rememberDomainForRule
             self?.closeFloatingPicker()
-            RulesStore.shared.logActivity(url: url, source: sourceApp, target: chosenTarget)
-            AppDiscoveryService.shared.open(url, with: chosenTarget)
+
+            if shouldRememberDomain {
+                _ = RulesStore.shared.saveQuickDomainRule(for: finalURL, target: chosenTarget, sourceApp: sourceApp)
+            }
+            RulesStore.shared.logActivity(url: finalURL, source: sourceApp, target: chosenTarget)
+            AppDiscoveryService.shared.open(finalURL, with: chosenTarget)
         }
         self.currentPickerSelectHandler = handleChoice
 
@@ -164,12 +224,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Calculate floating chooser dimensions scaled to the desktop resolution
         let iconSize = min(max(round(screenSize.height * 0.062), 54), 68)
-        let tileWidth = iconSize + 40
-        let contentWidthForApps = CGFloat(max(handlers.count, 3)) * (tileWidth + 14) + 48
-        let minPanelWidth = max(460, round(screenSize.width * 0.30))
-        let maxPanelWidth = min(800, round(screenSize.width * 0.58))
+        let tileWidth = iconSize + 42
+        let contentWidthForApps = CGFloat(max(handlers.count, 3)) * (tileWidth + 14) + 52
+        let minPanelWidth = max(480, round(screenSize.width * 0.32))
+        let maxPanelWidth = min(840, round(screenSize.width * 0.62))
         let panelWidth = min(max(contentWidthForApps, minPanelWidth), maxPanelWidth)
-        let panelHeight = min(max(round(screenSize.height * 0.22), 205), 245)
+        let panelHeight = min(max(round(screenSize.height * 0.22), 210), 250)
 
         let popupView = FloatingSelectorView(
             url: url,
@@ -178,6 +238,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             iconSize: iconSize,
             tileWidth: tileWidth,
             onSelect: handleChoice,
+            onOpenSettings: { [weak self] in
+                self?.closeFloatingPicker()
+                self?.showOnboardingWindow(initialTab: .features)
+            },
             onClose: { [weak self] in
                 self?.closeFloatingPicker()
             }
@@ -249,6 +313,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 return event
             }
 
+            let settings = RulesStore.shared.featureSettings
+
             // Cmd+C copies the clean URL to clipboard
             if event.modifierFlags.contains(.command),
                event.charactersIgnoringModifiers?.lowercased() == "c" {
@@ -256,8 +322,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 return nil
             }
 
+            // Cmd+R toggles "Remember Domain" quick rule creation
+            if settings.showRememberDomainInChooser,
+               event.modifierFlags.contains(.command),
+               event.charactersIgnoringModifiers?.lowercased() == "r" {
+                model.toggleRememberDomain()
+                return nil
+            }
+
             // Number keys 1..9 immediately select and launch the corresponding app tile
-            if let chars = event.charactersIgnoringModifiers,
+            if settings.showNumberShortcutsInChooser,
+               let chars = event.charactersIgnoringModifiers,
                chars.count == 1,
                let digit = Int(chars),
                (1...9).contains(digit) {
@@ -265,7 +340,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 if model.apps.indices.contains(targetIndex) {
                     model.selectedIndex = targetIndex
                     var chosen = model.apps[targetIndex]
-                    if event.modifierFlags.contains(.shift) {
+                    if model.isPrivateModePreview || event.modifierFlags.contains(.shift) {
                         chosen.openInPrivateMode = true
                     }
                     self.currentPickerSelectHandler?(chosen)
@@ -295,7 +370,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 return nil
             case 36, 76: // Return or Keypad Enter
                 if var chosen = model.selectedApp {
-                    if event.modifierFlags.contains(.shift) {
+                    if model.isPrivateModePreview || event.modifierFlags.contains(.shift) {
                         chosen.openInPrivateMode = true
                     }
                     self.currentPickerSelectHandler?(chosen)

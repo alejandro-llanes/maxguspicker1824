@@ -9,7 +9,9 @@ final class AppDiscoveryService {
     func getAvailableHandlers(
         for scheme: String,
         forURL url: URL? = nil,
-        sortRunningFirst: Bool = true
+        sortRunningFirst: Bool = true,
+        includeNativeHandoff: Bool = true,
+        pinnedProfiles: [PinnedProfileIdentity] = []
     ) -> [AppTarget] {
         let probeString = (scheme.lowercased() == "mailto") ? "mailto:user@example.com" : "\(scheme)://example.com"
         guard let probeURL = URL(string: probeString) ?? URL(string: "\(scheme)://") ?? URL(string: "\(scheme):") else {
@@ -60,10 +62,33 @@ final class AppDiscoveryService {
             }
         }
 
+        // Prepend pinned Browser + Profile identity tiles when handling web links
+        if isWebScheme && !pinnedProfiles.isEmpty {
+            let pinnedTargets: [AppTarget] = pinnedProfiles.compactMap { pinned in
+                if let existing = targets.first(where: { $0.bundleID == pinned.bundleID }) {
+                    var copy = existing
+                    copy.profile = pinned.profile
+                    return copy
+                } else if let appURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: pinned.bundleID) {
+                    return AppTarget(
+                        bundleID: pinned.bundleID,
+                        name: pinned.appName,
+                        appURL: appURL,
+                        icon: NSWorkspace.shared.icon(forFile: appURL.path),
+                        profile: pinned.profile,
+                        isRunning: runningBundleIDs.contains(pinned.bundleID)
+                    )
+                }
+                return nil
+            }
+            targets.insert(contentsOf: pinnedTargets, at: 0)
+        }
+
         // Prepend installed native macOS desktop app if this URL supports native deep-link handoff
-        if let url = url,
+        if includeNativeHandoff,
+           let url = url,
            let nativeTarget = NativeAppHandoffService.shared.installedNativeAppTarget(for: url) {
-            targets.removeAll { $0.bundleID == nativeTarget.bundleID }
+            targets.removeAll { $0.bundleID == nativeTarget.bundleID && $0.profile == nil }
             targets.insert(nativeTarget, at: 0)
         }
 

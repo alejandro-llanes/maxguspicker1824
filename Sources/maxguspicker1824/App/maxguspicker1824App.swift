@@ -14,9 +14,28 @@ struct MaxgusPicker1824App: App {
             // Status Banner
             if !systemService.isDefaultBrowser {
                 Button {
-                    appDelegate.showOnboardingWindow()
+                    appDelegate.showOnboardingWindow(initialTab: .permissions)
                 } label: {
                     Label("Not Set as Default Browser — Click to Fix", systemImage: "exclamationmark.triangle.fill")
+                }
+                Divider()
+            }
+
+            // Global Identity / Context Mode Switcher
+            if store.featureSettings.enableContextModeFiltering {
+                Menu {
+                    ForEach(IdentityContext.allCases) { ctx in
+                        Button {
+                            store.activeContext = ctx
+                        } label: {
+                            Label(
+                                ctx.rawValue,
+                                systemImage: store.activeContext == ctx ? "checkmark.circle.fill" : ctx.icon
+                            )
+                        }
+                    }
+                } label: {
+                    Label("Context Mode: \(store.activeContext.rawValue)", systemImage: store.activeContext.icon)
                 }
                 Divider()
             }
@@ -26,17 +45,17 @@ struct MaxgusPicker1824App: App {
                 Label("Pause Rules (Always Show Picker)", systemImage: "pause.circle")
             }
 
-            Toggle(isOn: $store.sanitizeURLsEnabled) {
+            Toggle(isOn: $store.featureSettings.sanitizeURLsEnabled) {
                 Label("Strip Tracking & Unwrap Redirects", systemImage: "sparkles")
             }
 
-            Toggle(isOn: $store.prioritizeRunningBrowsers) {
+            Toggle(isOn: $store.featureSettings.prioritizeRunningBrowsers) {
                 Label("Prioritize Running Browsers", systemImage: "bolt.circle")
             }
 
             Divider()
 
-            // Active Browser Tab Handoff
+            // Active Browser Tab Handoff & Clipboard Router
             Button {
                 appDelegate.rerouteActiveBrowserTab()
             } label: {
@@ -44,11 +63,20 @@ struct MaxgusPicker1824App: App {
             }
             .keyboardShortcut("o", modifiers: [.command, .shift])
 
+            Button {
+                appDelegate.routeClipboardURL()
+            } label: {
+                Label("Route URL from Clipboard...", systemImage: "doc.on.clipboard")
+            }
+            .keyboardShortcut("v", modifiers: [.command, .shift])
+
+            Divider()
+
             // Quick Rules Summary & Editor Launch
             Button {
                 appDelegate.showRulesWindow()
             } label: {
-                Label("Routing Rules (\(store.rules.filter(\.isEnabled).count) Active)...", systemImage: "slider.horizontal.3")
+                Label("Routing Rules (\(store.rules.filter(\.isEnabled).count) Active)...", systemImage: "list.bullet.rectangle")
             }
             .keyboardShortcut(",", modifiers: .command)
 
@@ -84,9 +112,15 @@ struct MaxgusPicker1824App: App {
             Divider()
 
             Button {
-                appDelegate.showOnboardingWindow()
+                appDelegate.showOnboardingWindow(initialTab: .features)
             } label: {
-                Label("Setup & Permissions Wizard...", systemImage: "gearshape.2")
+                Label("Features & Chooser UX Settings...", systemImage: "slider.horizontal.3")
+            }
+
+            Button {
+                appDelegate.showOnboardingWindow(initialTab: .permissions)
+            } label: {
+                Label("System Setup & Permissions...", systemImage: "gearshape.2")
             }
 
             Divider()

@@ -7,6 +7,7 @@ struct RulesManagerView: View {
     @ViewState private var selectedFilter: RouteType? = nil // nil = All
     @ViewState private var editingRule: RoutingRule? = nil
     @ViewState private var isShowingNewRuleSheet = false
+    @ViewState private var isShowingFeatureSettingsSheet = false
     @ViewState private var testInput: String
 
     init(initialTestInput: String = "") {
@@ -23,23 +24,53 @@ struct RulesManagerView: View {
             // MARK: - Top Header & Filter Bar
             HStack(spacing: 10) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Routing Rules")
-                        .font(.title2.bold())
+                    HStack(spacing: 8) {
+                        Text("Routing Rules")
+                            .font(.title2.bold())
+                            .fixedSize(horizontal: true, vertical: false)
+
+                        if store.featureSettings.enableContextModeFiltering {
+                            Menu {
+                                Section("Active Identity / Context Mode:") {
+                                    ForEach(IdentityContext.allCases) { ctx in
+                                        Button {
+                                            store.activeContext = ctx
+                                        } label: {
+                                            Label(
+                                                ctx.rawValue,
+                                                systemImage: store.activeContext == ctx ? "checkmark.circle.fill" : ctx.icon
+                                            )
+                                        }
+                                    }
+                                }
+                            } label: {
+                                Label(store.activeContext.rawValue, systemImage: store.activeContext.icon)
+                                    .font(.caption.weight(.semibold))
+                            }
+                            .menuStyle(.borderedButton)
+                            .controlSize(.small)
+                            .fixedSize()
+                            .help("Switch active Identity / Context Mode")
+                        }
+                    }
+
                     Text("Links matching a rule open automatically. Everything else shows the floating picker.")
-                        .font(.subheadline)
+                        .font(.caption)
                         .foregroundStyle(.secondary)
+                        .lineLimit(1)
                 }
 
-                Spacer()
+                Spacer(minLength: 8)
 
-                Picker("Filter", selection: $selectedFilter) {
-                    Text("All Rules").tag(RouteType?.none)
+                Picker("", selection: $selectedFilter) {
+                    Text("All").tag(RouteType?.none)
                     ForEach(RouteType.allCases) { type in
-                        Label(type.rawValue, systemImage: type.icon).tag(RouteType?.some(type))
+                        Text(type.rawValue).tag(RouteType?.some(type))
                     }
                 }
+                .labelsHidden()
                 .pickerStyle(.segmented)
-                .frame(width: 220)
+                .frame(width: 175)
 
                 // Templates Menu
                 Menu {
@@ -86,6 +117,20 @@ struct RulesManagerView: View {
                 .controlSize(.large)
                 .fixedSize()
 
+                // Features & Chooser UX Settings Button
+                Button {
+                    if let appDelegate = NSApp.delegate as? AppDelegate {
+                        appDelegate.showOnboardingWindow(initialTab: .features)
+                    } else {
+                        isShowingFeatureSettingsSheet = true
+                    }
+                } label: {
+                    Label("Features & UX", systemImage: "slider.horizontal.3")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.large)
+                .help("Configure Chooser UX & Enable/Disable Advanced Features")
+
                 // Export / Import Rules Menu
                 Menu {
                     Button {
@@ -99,6 +144,13 @@ struct RulesManagerView: View {
                         importRulesFromFile()
                     } label: {
                         Label("Import Rules from JSON...", systemImage: "square.and.arrow.down")
+                    }
+
+                    if store.featureSettings.showRuleHitStats {
+                        Divider()
+                        Button("Reset Rule Hit Counters", role: .destructive) {
+                            store.resetAllRuleHitStats()
+                        }
                     }
                 } label: {
                     Image(systemName: "ellipsis.circle")
@@ -127,7 +179,7 @@ struct RulesManagerView: View {
                 ContentUnavailableView {
                     Label("No Routing Rules Yet", systemImage: "arrow.triangle.branch")
                 } description: {
-                    Text("Create a rule manually, from a starter template, or from your history of previously opened links.")
+                    Text("Create a rule manually, from a starter template, or by clicking “Remember” (⌘R) in the Floating Chooser.")
                 } actions: {
                     HStack(spacing: 12) {
                         Button("Create Your First Rule") {
@@ -173,6 +225,7 @@ struct RulesManagerView: View {
                     ForEach(filteredRules) { rule in
                         RuleRowCard(
                             rule: rule,
+                            featureSettings: store.featureSettings,
                             isHighlightedByTester: isRuleMatchedByTester(rule),
                             onToggle: { isEnabled in
                                 if let idx = store.rules.firstIndex(where: { $0.id == rule.id }) {
@@ -201,7 +254,7 @@ struct RulesManagerView: View {
             // MARK: - Bottom Live Rule Tester Bar
             LiveRuleTesterBar(testInput: $testInput, matchedRule: currentTestedRule)
         }
-        .frame(minWidth: 880, minHeight: 560)
+        .frame(minWidth: 920, minHeight: 580)
         .sheet(isPresented: $isShowingNewRuleSheet) {
             RuleBuilderSheet(existingRule: nil) { newRule in
                 store.rules.append(newRule)
@@ -218,6 +271,9 @@ struct RulesManagerView: View {
                     store.rules[idx] = updatedRule
                 }
             }
+        }
+        .sheet(isPresented: $isShowingFeatureSettingsSheet) {
+            OnboardingWizardView(initialTab: .features)
         }
     }
 
@@ -249,7 +305,7 @@ struct RulesManagerView: View {
     // MARK: - Live Tester Helpers
     private var currentTestedRule: RoutingRule? {
         guard let url = normalizedTestURL(from: testInput) else { return nil }
-        let evaluatedURL = store.sanitizeURLsEnabled ? URLSanitizerService.shared.sanitize(url) : url
+        let evaluatedURL = store.featureSettings.sanitizeURLsEnabled ? URLSanitizerService.shared.sanitize(url) : url
         return store.findMatchingRule(for: evaluatedURL, sourceApp: nil)
     }
 
@@ -276,6 +332,7 @@ struct RulesManagerView: View {
 
 struct RuleRowCard: View {
     let rule: RoutingRule
+    let featureSettings: FeatureSettings
     let isHighlightedByTester: Bool
     let onToggle: (Bool) -> Void
     let onEdit: () -> Void
@@ -310,13 +367,37 @@ struct RuleRowCard: View {
                         .font(.headline)
                         .strikethrough(!rule.isEnabled)
 
-                    if let sched = rule.schedule, sched.isEnabled {
+                    if featureSettings.enableContextModeFiltering,
+                       let ctx = rule.contextFilter,
+                       ctx != .all {
+                        Label(ctx.rawValue, systemImage: ctx.icon)
+                            .font(.caption2.weight(.semibold))
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 2)
+                            .background(Color.indigo.opacity(0.15), in: Capsule())
+                            .foregroundStyle(.indigo)
+                    }
+
+                    if featureSettings.enableTimeScheduledRules,
+                       let sched = rule.schedule,
+                       sched.isEnabled {
                         Label(sched.displaySummary, systemImage: "clock.badge.checkmark")
                             .font(.caption2.weight(.semibold))
                             .padding(.horizontal, 7)
                             .padding(.vertical, 2)
                             .background(Color.purple.opacity(0.15), in: Capsule())
                             .foregroundStyle(.purple)
+                    }
+
+                    if featureSettings.enableURLRewriteRules,
+                       let authUser = rule.googleAuthUser,
+                       !authUser.isEmpty {
+                        Label("authuser=\(authUser)", systemImage: "person.badge.key.fill")
+                            .font(.caption2.weight(.semibold))
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 2)
+                            .background(Color.blue.opacity(0.15), in: Capsule())
+                            .foregroundStyle(.blue)
                     }
 
                     if rule.openInPrivateMode {
@@ -326,6 +407,15 @@ struct RuleRowCard: View {
                             .padding(.vertical, 2)
                             .background(Color.orange.opacity(0.16), in: Capsule())
                             .foregroundStyle(.orange)
+                    }
+
+                    if featureSettings.showRuleHitStats && rule.hitCount > 0 {
+                        Label("\(rule.hitCount) \(rule.hitCount == 1 ? "hit" : "hits")", systemImage: "chart.bar.fill")
+                            .font(.caption2.weight(.semibold))
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 2)
+                            .background(Color.green.opacity(0.15), in: Capsule())
+                            .foregroundStyle(.green)
                     }
                 }
 
@@ -410,7 +500,7 @@ struct LiveRuleTesterBar: View {
             Image(systemName: "wand.and.stars")
                 .foregroundStyle(.purple)
 
-            TextField("Test a link or email (e.g. github.com/apple or billing@company.com)...", text: $testInput)
+            TextField("Test a link or email (e.g. meet.google.com/abc or billing@company.com)...", text: $testInput)
                 .textFieldStyle(.roundedBorder)
 
             if !testInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {

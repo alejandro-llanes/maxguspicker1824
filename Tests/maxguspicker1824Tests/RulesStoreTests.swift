@@ -297,4 +297,98 @@ struct RulesStoreTests {
         #expect(importedCount == 1)
         #expect(store.rules.first == scheduledRule)
     }
+
+    @Test("IdentityContext mode filtering and Multi-Account URL rewriting (authuser & find/replace)")
+    func contextModeFilteringAndURLRewriting() {
+        let (store, defaults, suiteName) = makeIsolatedStore()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let workMeetRule = RoutingRule(
+            name: "Work Google Meet",
+            type: .web,
+            contextFilter: .work,
+            field: .domain,
+            matchOperator: .equals,
+            value: "meet.google.com",
+            targetAppBundleID: "com.google.Chrome",
+            targetAppName: "Google Chrome",
+            googleAuthUser: "alejandro@company.com"
+        )
+        let personalMeetRule = RoutingRule(
+            name: "Personal Google Meet",
+            type: .web,
+            contextFilter: .personal,
+            field: .domain,
+            matchOperator: .equals,
+            value: "meet.google.com",
+            targetAppBundleID: "com.apple.Safari",
+            targetAppName: "Safari",
+            googleAuthUser: "0",
+            urlFindPattern: "old-room",
+            urlReplacePattern: "new-room"
+        )
+        store.rules = [workMeetRule, personalMeetRule]
+
+        let meetURL = URL(string: "https://meet.google.com/old-room-xyz")!
+
+        // When activeContext is .work -> matches workMeetRule
+        store.activeContext = .work
+        let matchedWork = store.findMatchingRule(for: meetURL)
+        #expect(matchedWork?.id == workMeetRule.id)
+        #expect(matchedWork?.transformURL(meetURL).absoluteString == "https://meet.google.com/old-room-xyz?authuser=alejandro@company.com")
+
+        // When activeContext is .personal -> matches personalMeetRule & transforms both path and authuser
+        store.activeContext = .personal
+        let matchedPersonal = store.findMatchingRule(for: meetURL)
+        #expect(matchedPersonal?.id == personalMeetRule.id)
+        #expect(matchedPersonal?.transformURL(meetURL).absoluteString == "https://meet.google.com/new-room-xyz?authuser=0")
+
+        // When activeContext is .client -> neither rule matches
+        store.activeContext = .client
+        #expect(store.findMatchingRule(for: meetURL) == nil)
+    }
+
+    @Test("Quick domain rule creation, pinned profiles, rule hit stats, and shortlink detection")
+    func quickRulePinnedProfilesHitStatsAndShortlinks() {
+        let (store, defaults, suiteName) = makeIsolatedStore()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let workProfile = BrowserProfile(id: "Profile 2", displayName: "Work", engine: .chromium)
+        let target = AppTarget(
+            bundleID: "com.google.Chrome",
+            name: "Google Chrome",
+            appURL: URL(fileURLWithPath: "/Applications/Google Chrome.app"),
+            icon: .init(),
+            profile: workProfile
+        )
+
+        // Pin & unpin profile
+        #expect(!store.isProfilePinned(bundleID: "com.google.Chrome", profileID: "Profile 2"))
+        store.togglePinProfile(bundleID: "com.google.Chrome", appName: "Google Chrome", profile: workProfile)
+        #expect(store.isProfilePinned(bundleID: "com.google.Chrome", profileID: "Profile 2"))
+        #expect(store.pinnedProfiles.count == 1)
+
+        // Quick domain rule creation (Cmd+R in Chooser)
+        let savedRule = store.saveQuickDomainRule(for: URL(string: "https://www.linear.app/team/issue")!, target: target)
+        #expect(savedRule != nil)
+        #expect(savedRule?.value == "linear.app")
+        #expect(savedRule?.targetProfile == workProfile)
+        #expect(store.rules.count == 1)
+
+        // Rule hit counter tracking
+        if let ruleID = savedRule?.id {
+            store.recordRuleHit(for: ruleID)
+            store.recordRuleHit(for: ruleID)
+            #expect(store.rules.first?.hitCount == 2)
+            #expect(store.rules.first?.lastMatchedAt != nil)
+            store.resetAllRuleHitStats()
+            #expect(store.rules.first?.hitCount == 0)
+        }
+
+        // Shortlink detection & Clipboard URL normalization
+        #expect(ShortlinkExpanderService.shared.isShortlink(URL(string: "https://bit.ly/3xyz")!))
+        #expect(!ShortlinkExpanderService.shared.isShortlink(URL(string: "https://github.com/apple/swift")!))
+        #expect(AppDelegate.normalizeUserURL(from: "github.com/apple/swift")?.absoluteString == "https://github.com/apple/swift")
+        #expect(AppDelegate.normalizeUserURL(from: "billing@company.com")?.absoluteString == "mailto:billing@company.com")
+    }
 }

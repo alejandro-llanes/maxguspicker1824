@@ -9,6 +9,10 @@ final class PickerSelectionModel: ObservableObject {
     @Published var isURLPreviewExpanded: Bool = false
     @Published var didCopyURL: Bool = false
     @Published var isPrivateModePreview: Bool = false
+    @Published var rememberDomainForRule: Bool = false
+    @Published var expandedShortlinkURL: URL? = nil
+    @Published var isExpandingShortlink: Bool = false
+
     let apps: [AppTarget]
     let url: URL
 
@@ -16,6 +20,10 @@ final class PickerSelectionModel: ObservableObject {
         self.apps = apps
         self.url = url
         self.selectedIndex = 0
+    }
+
+    var effectiveURL: URL {
+        expandedShortlinkURL ?? url
     }
 
     var selectedApp: AppTarget? {
@@ -39,14 +47,27 @@ final class PickerSelectionModel: ObservableObject {
         }
     }
 
+    func toggleRememberDomain() {
+        withAnimation(.easeInOut(duration: 0.15)) {
+            rememberDomainForRule.toggle()
+        }
+    }
+
+    func togglePrivateMode() {
+        withAnimation(.easeInOut(duration: 0.15)) {
+            isPrivateModePreview.toggle()
+        }
+    }
+
     func copyURLToPasteboard() {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
+        let targetURL = effectiveURL
         let stringToCopy: String
-        if url.scheme?.lowercased() == "mailto" {
-            stringToCopy = URLComponents(url: url, resolvingAgainstBaseURL: false)?.path ?? url.absoluteString
+        if targetURL.scheme?.lowercased() == "mailto" {
+            stringToCopy = URLComponents(url: targetURL, resolvingAgainstBaseURL: false)?.path ?? targetURL.absoluteString
         } else {
-            stringToCopy = url.absoluteString
+            stringToCopy = targetURL.absoluteString
         }
         pasteboard.setString(stringToCopy, forType: .string)
         withAnimation(.easeInOut(duration: 0.15)) {
@@ -59,49 +80,67 @@ struct FloatingSelectorView: View {
     let url: URL
     var sourceApp: SourceAppInfo? = nil
     @ObservedObject var selectionModel: PickerSelectionModel
+    @ObservedObject var store = RulesStore.shared
     let iconSize: CGFloat
     let tileWidth: CGFloat
     let onSelect: (AppTarget) -> Void
+    var onOpenSettings: (() -> Void)? = nil
     var onClose: (() -> Void)? = nil
 
     private var displayHeader: String {
-        if url.scheme?.lowercased() == "mailto" {
-            return URLComponents(url: url, resolvingAgainstBaseURL: false)?.path ?? url.absoluteString
+        let current = selectionModel.effectiveURL
+        if current.scheme?.lowercased() == "mailto" {
+            return URLComponents(url: current, resolvingAgainstBaseURL: false)?.path ?? current.absoluteString
         }
-        return url.host ?? url.absoluteString
+        if let expanded = selectionModel.expandedShortlinkURL,
+           let origHost = url.host,
+           let destHost = expanded.host,
+           origHost.caseInsensitiveCompare(destHost) != .orderedSame {
+            return "\(origHost) → \(destHost)"
+        }
+        return current.host ?? current.absoluteString
     }
 
     var body: some View {
-        VStack(spacing: 12) {
-            // Top Drag Handle + Header Bar
-            HStack(spacing: 8) {
+        VStack(spacing: 10) {
+            // MARK: - Top Header Bar (Domain Pill + Drag Grip + Quick Action Pills)
+            HStack(spacing: 6) {
                 // URL / Email Preview Pill (click or press Space to expand full URL)
                 Button {
                     selectionModel.toggleURLPreview()
                 } label: {
                     HStack(spacing: 6) {
                         Image(systemName: url.scheme?.lowercased() == "mailto" ? "envelope.fill" : "link")
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(selectionModel.expandedShortlinkURL != nil ? .green : .secondary)
                         Text(displayHeader)
                             .font(.subheadline.weight(.semibold))
                             .lineLimit(1)
                             .truncationMode(.middle)
+                        if selectionModel.isExpandingShortlink {
+                            ProgressView()
+                                .controlSize(.mini)
+                        }
                         if let src = sourceApp {
                             Text("• \(src.name)")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                                 .lineLimit(1)
                         }
+                        if store.featureSettings.enableContextModeFiltering && store.activeContext != .all {
+                            Text("• \(store.activeContext.rawValue)")
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(.blue)
+                        }
                         Image(systemName: selectionModel.isURLPreviewExpanded ? "chevron.up" : "chevron.down")
                             .font(.system(size: 8, weight: .bold))
                             .foregroundStyle(.tertiary)
                     }
-                    .padding(.horizontal, 12)
+                    .padding(.horizontal, 11)
                     .padding(.vertical, 5)
                     .background(.quaternary.opacity(0.5), in: Capsule())
                 }
                 .buttonStyle(.plain)
-                .help("\(url.absoluteString) (Click or press Space to toggle full URL)")
+                .help("\(selectionModel.effectiveURL.absoluteString) (Click or press Space to inspect full URL)")
 
                 // Quick Copy URL Button (⌘C)
                 Button {
@@ -109,7 +148,7 @@ struct FloatingSelectorView: View {
                 } label: {
                     HStack(spacing: 4) {
                         Image(systemName: selectionModel.didCopyURL ? "checkmark" : "doc.on.doc")
-                            .font(.system(size: 11, weight: .semibold))
+                            .font(.system(size: 10, weight: .semibold))
                         if selectionModel.didCopyURL {
                             Text("Copied")
                                 .font(.caption2.weight(.semibold))
@@ -123,32 +162,88 @@ struct FloatingSelectorView: View {
                 .buttonStyle(.plain)
                 .help("Copy clean URL to clipboard (⌘C)")
 
-                if selectionModel.isPrivateModePreview {
-                    HStack(spacing: 4) {
-                        Image(systemName: "eyeglasses")
-                            .font(.system(size: 10, weight: .bold))
-                        Text("Private Mode")
-                            .font(.caption2.weight(.bold))
-                    }
-                    .foregroundStyle(.orange)
-                    .padding(.horizontal, 9)
-                    .padding(.vertical, 4)
-                    .background(
-                        Capsule()
-                            .fill(Color.orange.opacity(0.18))
-                            .overlay(Capsule().strokeBorder(Color.orange.opacity(0.45), lineWidth: 1))
-                    )
-                }
-
                 Spacer(minLength: 4)
 
                 // Subtle Drag Grip Indicator
                 Capsule()
                     .fill(.tertiary)
-                    .frame(width: 34, height: 4)
+                    .frame(width: 28, height: 4)
                     .help("Drag anywhere on the panel to move")
 
                 Spacer(minLength: 4)
+
+                // Interactive "Remember Domain" Quick-Rule Toggle Pill (⌘R)
+                if store.featureSettings.showRememberDomainInChooser {
+                    Button {
+                        selectionModel.toggleRememberDomain()
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: selectionModel.rememberDomainForRule ? "pin.fill" : "pin")
+                                .font(.system(size: 10, weight: .semibold))
+                            Text("Remember")
+                                .font(.caption2.weight(.semibold))
+                        }
+                        .foregroundStyle(selectionModel.rememberDomainForRule ? .blue : .secondary)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(
+                            Capsule()
+                                .fill(selectionModel.rememberDomainForRule ? Color.blue.opacity(0.18) : Color.secondary.opacity(0.12))
+                                .overlay(
+                                    Capsule().strokeBorder(
+                                        selectionModel.rememberDomainForRule ? Color.blue.opacity(0.5) : Color.clear,
+                                        lineWidth: 1
+                                    )
+                                )
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .help("Save a routing rule for this domain when you pick an app (⌘R)")
+                }
+
+                // Interactive Private / Incognito Toggle Pill (Shift or Click)
+                if store.featureSettings.showPrivateModeInChooser && url.scheme?.lowercased() != "mailto" {
+                    Button {
+                        selectionModel.togglePrivateMode()
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "eyeglasses")
+                                .font(.system(size: 10, weight: .bold))
+                            Text("Private")
+                                .font(.caption2.weight(.semibold))
+                        }
+                        .foregroundStyle(selectionModel.isPrivateModePreview ? .orange : .secondary)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(
+                            Capsule()
+                                .fill(selectionModel.isPrivateModePreview ? Color.orange.opacity(0.18) : Color.secondary.opacity(0.12))
+                                .overlay(
+                                    Capsule().strokeBorder(
+                                        selectionModel.isPrivateModePreview ? Color.orange.opacity(0.45) : Color.clear,
+                                        lineWidth: 1
+                                    )
+                                )
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .help("Open in Private / Incognito window (Click or hold ⇧ Shift)")
+                }
+
+                // Quick Chooser UX Settings Button
+                if let onOpenSettings = onOpenSettings {
+                    Button {
+                        onOpenSettings()
+                    } label: {
+                        Image(systemName: "slider.horizontal.3")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(.secondary)
+                            .padding(5)
+                            .background(.quaternary.opacity(0.35), in: Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .help("Customize Chooser Features & UX Settings")
+                }
 
                 if let onClose = onClose {
                     Button {
@@ -165,23 +260,37 @@ struct FloatingSelectorView: View {
             .contentShape(Rectangle())
             .background(WindowDragHandler())
 
-            // Optional Expanded Full URL Preview Banner (toggled via Space or clicking domain pill)
+            // MARK: - Optional Expanded Full URL / Shortlink Inspector
             if selectionModel.isURLPreviewExpanded {
-                HStack {
-                    Text(url.absoluteString)
-                        .font(.system(.caption2, design: .monospaced))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(2)
-                        .truncationMode(.middle)
-                        .textSelection(.enabled)
-                    Spacer(minLength: 0)
+                VStack(alignment: .leading, spacing: 3) {
+                    if let expanded = selectionModel.expandedShortlinkURL,
+                       expanded.absoluteString != url.absoluteString {
+                        HStack(spacing: 4) {
+                            Image(systemName: "arrow.turn.down.right")
+                                .font(.caption2)
+                                .foregroundStyle(.green)
+                            Text("Unfurled destination: \(expanded.absoluteString)")
+                                .font(.system(.caption2, design: .monospaced))
+                                .foregroundStyle(.green)
+                                .lineLimit(2)
+                                .truncationMode(.middle)
+                        }
+                    } else {
+                        Text(selectionModel.effectiveURL.absoluteString)
+                            .font(.system(.caption2, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                            .truncationMode(.middle)
+                            .textSelection(.enabled)
+                    }
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 6)
                 .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
             }
 
-            // App Icons Row with Keyboard Selection Highlight & Number Badges
+            // MARK: - App & Identity Tiles Row
             if selectionModel.apps.isEmpty {
                 Text("No compatible applications found")
                     .font(.subheadline)
@@ -190,11 +299,12 @@ struct FloatingSelectorView: View {
             } else {
                 ScrollViewReader { proxy in
                     ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 14) {
+                        HStack(spacing: 12) {
                             ForEach(Array(selectionModel.apps.enumerated()), id: \.element.id) { index, app in
                                 AppSelectorTile(
                                     app: app,
-                                    shortcutNumber: index < 9 ? (index + 1) : nil,
+                                    shortcutNumber: (store.featureSettings.showNumberShortcutsInChooser && index < 9) ? (index + 1) : nil,
+                                    showRunningDot: store.featureSettings.showRunningIndicatorInChooser,
                                     isSelected: selectionModel.selectedIndex == index,
                                     iconSize: iconSize,
                                     tileWidth: tileWidth,
@@ -206,7 +316,7 @@ struct FloatingSelectorView: View {
                                     onPick: { targetWithOptionalProfile in
                                         selectionModel.selectedIndex = index
                                         var chosen = targetWithOptionalProfile
-                                        if NSEvent.modifierFlags.contains(.shift) {
+                                        if selectionModel.isPrivateModePreview || NSEvent.modifierFlags.contains(.shift) {
                                             chosen.openInPrivateMode = true
                                         }
                                         onSelect(chosen)
@@ -226,18 +336,28 @@ struct FloatingSelectorView: View {
                 }
             }
 
-            // Subtle Keyboard Navigation Hint Bar
-            HStack(spacing: 14) {
-                Label("← → / 1–9 Select", systemImage: "keyboard")
-                Label("⏎ Open", systemImage: "return")
-                Label("⇧⏎ Private", systemImage: "eyeglasses")
-                Label("⌘C Copy", systemImage: "doc.on.doc")
-                Label("Esc Dismiss", systemImage: "escape")
+            // MARK: - Optional Clean Keyboard Navigation Hint Bar
+            if store.featureSettings.showKeyboardHintsInChooser {
+                HStack(spacing: 14) {
+                    Label(
+                        store.featureSettings.showNumberShortcutsInChooser ? "← → / 1–9 Select" : "← → Select",
+                        systemImage: "keyboard"
+                    )
+                    Label("⏎ Open", systemImage: "return")
+                    if store.featureSettings.showPrivateModeInChooser {
+                        Label("⇧ Private", systemImage: "eyeglasses")
+                    }
+                    if store.featureSettings.showRememberDomainInChooser {
+                        Label("⌘R Remember", systemImage: "pin")
+                    }
+                    Label("Space URL", systemImage: "text.magnifyingglass")
+                    Label("Esc Close", systemImage: "escape")
+                }
+                .font(.caption2)
+                .foregroundStyle(.secondary)
             }
-            .font(.caption2)
-            .foregroundStyle(.secondary)
         }
-        .padding(18)
+        .padding(16)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(
             ZStack {
@@ -273,11 +393,14 @@ private struct WindowDragHandler: NSViewRepresentable {
 struct AppSelectorTile: View {
     let app: AppTarget
     let shortcutNumber: Int?
+    let showRunningDot: Bool
     let isSelected: Bool
     let iconSize: CGFloat
     let tileWidth: CGFloat
     let onHoverChange: (Bool) -> Void
     let onPick: (AppTarget) -> Void
+
+    @ObservedObject private var store = RulesStore.shared
 
     private var profiles: [BrowserProfile] {
         if app.bundleID == "com.apple.Safari" {
@@ -287,7 +410,7 @@ struct AppSelectorTile: View {
     }
 
     var body: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: 6) {
             ZStack(alignment: .topLeading) {
                 Button {
                     onPick(app)
@@ -298,8 +421,22 @@ struct AppSelectorTile: View {
                             .interpolation(.high)
                             .frame(width: iconSize, height: iconSize)
 
-                        // Green dot indicator when the application is currently running
-                        if app.isRunning {
+                        // Pinned Profile Badge Overlay
+                        if let pinnedProfile = app.profile {
+                            Text(pinnedProfile.displayName)
+                                .font(.system(size: 9, weight: .bold))
+                                .foregroundStyle(.white)
+                                .lineLimit(1)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(
+                                    Capsule()
+                                        .fill(Color.blue)
+                                        .shadow(color: .black.opacity(0.35), radius: 2, y: 1)
+                                )
+                                .offset(y: 4)
+                        } else if showRunningDot && app.isRunning {
+                            // Green dot indicator when the application is currently running
                             Circle()
                                 .fill(Color.green)
                                 .frame(width: 10, height: 10)
@@ -314,19 +451,38 @@ struct AppSelectorTile: View {
                 }
                 .buttonStyle(.plain)
                 .contextMenu {
-                    Button("Open in Default Window") { onPick(app) }
+                    Button("Open in \(app.displayTitle)") { onPick(app) }
                     Button("Open in Private / Incognito Window") {
                         var privateTarget = app
                         privateTarget.openInPrivateMode = true
                         onPick(privateTarget)
                     }
-                    if !profiles.isEmpty {
+                    if let currentProfile = app.profile {
+                        Divider()
+                        Button("Unpin “\(currentProfile.displayName)” from Chooser") {
+                            store.togglePinProfile(bundleID: app.bundleID, appName: app.name, profile: currentProfile)
+                        }
+                    } else if !profiles.isEmpty {
                         Divider()
                         ForEach(profiles) { profile in
-                            Button(profile.displayName) {
+                            Button("Open in Profile: \(profile.displayName)") {
                                 var modified = app
                                 modified.profile = profile
                                 onPick(modified)
+                            }
+                        }
+                        Divider()
+                        Menu("Pin Profile as Top-Level Chooser Tile") {
+                            ForEach(profiles) { profile in
+                                let isPinned = store.isProfilePinned(bundleID: app.bundleID, profileID: profile.id)
+                                Button {
+                                    store.togglePinProfile(bundleID: app.bundleID, appName: app.name, profile: profile)
+                                } label: {
+                                    Label(
+                                        isPinned ? "Unpin \(profile.displayName)" : "Pin \(profile.displayName)",
+                                        systemImage: isPinned ? "pin.slash" : "pin.fill"
+                                    )
+                                }
                             }
                         }
                     }
@@ -347,6 +503,7 @@ struct AppSelectorTile: View {
                 }
             }
 
+            // Label & Optional Profile Selector
             if app.isNativeAppHandoff {
                 HStack(spacing: 3) {
                     Image(systemName: "arrow.up.forward.app.fill")
@@ -357,13 +514,23 @@ struct AppSelectorTile: View {
                         .foregroundStyle(isSelected ? .primary : .secondary)
                         .lineLimit(1)
                 }
+            } else if let pinnedProfile = app.profile {
+                VStack(spacing: 1) {
+                    Text(app.name)
+                        .font(.caption.weight(isSelected ? .semibold : .regular))
+                        .foregroundStyle(isSelected ? .primary : .secondary)
+                        .lineLimit(1)
+                    Text(pinnedProfile.displayName)
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(.blue)
+                        .lineLimit(1)
+                }
             } else if profiles.isEmpty {
                 Text(app.name)
                     .font(.caption.weight(isSelected ? .semibold : .regular))
                     .foregroundStyle(isSelected ? .primary : .secondary)
                     .lineLimit(1)
             } else {
-                // Dropdown menu for profiles right under the browser icon
                 Menu {
                     Button("Default Window") { onPick(app) }
                     Button("Private / Incognito Window") {
@@ -377,6 +544,20 @@ struct AppSelectorTile: View {
                             var modified = app
                             modified.profile = profile
                             onPick(modified)
+                        }
+                    }
+                    Divider()
+                    Menu("Pin Identity to Chooser...") {
+                        ForEach(profiles) { profile in
+                            let isPinned = store.isProfilePinned(bundleID: app.bundleID, profileID: profile.id)
+                            Button {
+                                store.togglePinProfile(bundleID: app.bundleID, appName: app.name, profile: profile)
+                            } label: {
+                                Label(
+                                    isPinned ? "Unpin \(profile.displayName)" : "Pin \(profile.displayName)",
+                                    systemImage: isPinned ? "pin.slash" : "pin.fill"
+                                )
+                            }
                         }
                     }
                 } label: {

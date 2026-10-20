@@ -9,11 +9,27 @@ final class RulesStore: ObservableObject {
     }
 
     @Published var isPaused: Bool = false // Controlled from the Menu Bar
-    @Published var sanitizeURLsEnabled: Bool = true {
-        didSet { userDefaults.set(sanitizeURLsEnabled, forKey: "SanitizeURLsEnabled_v1") }
+
+    @Published var featureSettings: FeatureSettings = FeatureSettings() {
+        didSet { saveFeatureSettings() }
     }
-    @Published var prioritizeRunningBrowsers: Bool = true {
-        didSet { userDefaults.set(prioritizeRunningBrowsers, forKey: "PrioritizeRunningBrowsers_v1") }
+
+    var sanitizeURLsEnabled: Bool {
+        get { featureSettings.sanitizeURLsEnabled }
+        set { featureSettings.sanitizeURLsEnabled = newValue }
+    }
+
+    var prioritizeRunningBrowsers: Bool {
+        get { featureSettings.prioritizeRunningBrowsers }
+        set { featureSettings.prioritizeRunningBrowsers = newValue }
+    }
+
+    @Published var activeContext: IdentityContext = .all {
+        didSet { userDefaults.set(activeContext.rawValue, forKey: "ActiveIdentityContext_v1") }
+    }
+
+    @Published var pinnedProfiles: [PinnedProfileIdentity] = [] {
+        didSet { savePinnedProfiles() }
     }
 
     @Published var recentActivity: [ActivityRecord] = [] {
@@ -26,6 +42,8 @@ final class RulesStore: ObservableObject {
     private let userDefaults: UserDefaults
     private let storageKey: String
     private let activityStorageKey: String
+    private let settingsStorageKey = "FeatureSettings_v1"
+    private let pinnedProfilesKey = "PinnedProfiles_v1"
 
     init(
         userDefaults: UserDefaults = .standard,
@@ -35,12 +53,12 @@ final class RulesStore: ObservableObject {
         self.userDefaults = userDefaults
         self.storageKey = storageKey
         self.activityStorageKey = activityStorageKey
-        if userDefaults.object(forKey: "SanitizeURLsEnabled_v1") != nil {
-            self.sanitizeURLsEnabled = userDefaults.bool(forKey: "SanitizeURLsEnabled_v1")
+        loadFeatureSettings()
+        if let rawContext = userDefaults.string(forKey: "ActiveIdentityContext_v1"),
+           let ctx = IdentityContext(rawValue: rawContext) {
+            self.activeContext = ctx
         }
-        if userDefaults.object(forKey: "PrioritizeRunningBrowsers_v1") != nil {
-            self.prioritizeRunningBrowsers = userDefaults.bool(forKey: "PrioritizeRunningBrowsers_v1")
-        }
+        loadPinnedProfiles()
         loadRules()
         loadActivity()
     }
@@ -50,8 +68,20 @@ final class RulesStore: ObservableObject {
         let type: RouteType = (scheme == "mailto") ? .mail : .web
 
         for rule in rules where rule.isEnabled && rule.type == type {
-            // 1. If the rule has an active schedule, verify day & time window
-            if let schedule = rule.schedule, schedule.isEnabled {
+            // 0. If Context Mode filtering is enabled and activeContext != .all,
+            // skip rules explicitly assigned to a different context.
+            if featureSettings.enableContextModeFiltering,
+               activeContext != .all,
+               let ruleCtx = rule.contextFilter,
+               ruleCtx != .all,
+               ruleCtx != activeContext {
+                continue
+            }
+
+            // 1. If Work Hours Schedules are enabled and the rule has an active schedule, verify day & time window
+            if featureSettings.enableWorkHoursSchedules,
+               let schedule = rule.schedule,
+               schedule.isEnabled {
                 guard schedule.isActive(at: date) else { continue }
             }
 
@@ -72,6 +102,81 @@ final class RulesStore: ObservableObject {
             }
         }
         return nil
+    }
+
+    func recordRuleHit(for ruleID: UUID, at date: Date = Date()) {
+        guard featureSettings.trackRuleHitStats,
+              let idx = rules.firstIndex(where: { $0.id == ruleID }) else {
+            return
+        }
+        rules[idx].hitCount += 1
+        rules[idx].lastMatchedAt = date
+    }
+
+    func resetAllRuleHitStats() {
+        for idx in rules.indices {
+            rules[idx].hitCount = 0
+            rules[idx].lastMatchedAt = nil
+        }
+    }
+
+    @discardableResult
+    func saveQuickDomainRule(for url: URL, target: AppTarget, sourceApp: SourceAppInfo? = nil) -> RoutingRule? {
+        let isMail = (url.scheme?.lowercased() == "mailto")
+        let matchField: MatchField = isMail ? .emailDomain : .domain
+        let rawHost: String
+        if isMail {
+            let email = URLComponents(url: url, resolvingAgainstBaseURL: false)?.path ?? ""
+            rawHost = email.components(separatedBy: "@").last ?? email
+        } else {
+            rawHost = (url.host ?? "").replacingOccurrences(of: "^www\\.", with: "", options: .regularExpression)
+        }
+        guard !rawHost.isEmpty else { return nil }
+
+        let newRule = RoutingRule(
+            name: "\(rawHost) → \(target.displayTitle)",
+            type: isMail ? .mail : .web,
+            sourceApp: nil,
+            contextFilter: activeContext == .all ? nil : activeContext,
+            field: matchField,
+            matchOperator: .equals,
+            value: rawHost,
+            targetAppBundleID: target.bundleID,
+            targetAppName: target.name,
+            targetProfile: target.profile,
+            openInPrivateMode: target.openInPrivateMode,
+            isEnabled: true
+        )
+
+        // Update existing quick rule for the same domain if one exists, otherwise insert at top
+        if let existingIdx = rules.firstIndex(where: {
+            $0.type == newRule.type &&
+            $0.field == newRule.field &&
+            $0.matchOperator == .equals &&
+            $0.value.caseInsensitiveCompare(rawHost) == .orderedSame &&
+            $0.sourceApp == nil
+        }) {
+            rules[existingIdx] = newRule
+        } else {
+            rules.insert(newRule, at: 0)
+        }
+        return newRule
+    }
+
+    // MARK: - Pinned Profile Identities Management
+
+    func isProfilePinned(bundleID: String, profileID: String) -> Bool {
+        let id = "\(bundleID)::\(profileID)"
+        return pinnedProfiles.contains { $0.id == id }
+    }
+
+    func togglePinProfile(bundleID: String, appName: String, profile: BrowserProfile) {
+        let identity = PinnedProfileIdentity(bundleID: bundleID, appName: appName, profile: profile)
+        if let idx = pinnedProfiles.firstIndex(where: { $0.id == identity.id }) {
+            pinnedProfiles.remove(at: idx)
+        } else {
+            pinnedProfiles.append(identity)
+        }
     }
 
     func evaluate(rule: RoutingRule, against url: URL) -> Bool {
@@ -214,4 +319,41 @@ final class RulesStore: ObservableObject {
         }
         recentActivity = decoded
     }
+
+    private func saveFeatureSettings() {
+        if let encoded = try? JSONEncoder().encode(featureSettings) {
+            userDefaults.set(encoded, forKey: settingsStorageKey)
+        }
+    }
+
+    private func loadFeatureSettings() {
+        if let data = userDefaults.data(forKey: settingsStorageKey),
+           let decoded = try? JSONDecoder().decode(FeatureSettings.self, from: data) {
+            self.featureSettings = decoded
+        } else {
+            var migrated = FeatureSettings()
+            if userDefaults.object(forKey: "SanitizeURLsEnabled_v1") != nil {
+                migrated.sanitizeURLsEnabled = userDefaults.bool(forKey: "SanitizeURLsEnabled_v1")
+            }
+            if userDefaults.object(forKey: "PrioritizeRunningBrowsers_v1") != nil {
+                migrated.prioritizeRunningBrowsers = userDefaults.bool(forKey: "PrioritizeRunningBrowsers_v1")
+            }
+            self.featureSettings = migrated
+        }
+    }
+
+    private func savePinnedProfiles() {
+        if let encoded = try? JSONEncoder().encode(pinnedProfiles) {
+            userDefaults.set(encoded, forKey: pinnedProfilesKey)
+        }
+    }
+
+    private func loadPinnedProfiles() {
+        guard let data = userDefaults.data(forKey: pinnedProfilesKey),
+              let decoded = try? JSONDecoder().decode([PinnedProfileIdentity].self, from: data) else {
+            return
+        }
+        pinnedProfiles = decoded
+    }
 }
+
