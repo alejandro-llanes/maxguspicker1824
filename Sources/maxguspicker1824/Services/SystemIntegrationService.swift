@@ -14,11 +14,11 @@ final class SystemIntegrationService: ObservableObject {
     @Published var isLaunchAtLoginEnabled: Bool = false
 
     var appVersion: String {
-        (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "1.1.1"
+        (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "1.1.3"
     }
 
     var buildNumber: String {
-        (Bundle.main.infoDictionary?["CFBundleVersion"] as? String) ?? "3"
+        (Bundle.main.infoDictionary?["CFBundleVersion"] as? String) ?? "5"
     }
 
     var versionBadgeText: String {
